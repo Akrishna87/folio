@@ -28,7 +28,7 @@ dump() {
   for i in 1 2 3; do
     adb shell uiautomator dump /sdcard/ui.xml > /dev/null 2>&1 && adb pull /sdcard/ui.xml "$OUT/$1.xml" > /dev/null 2>&1 || { sleep 2; continue; }
     # The emulator's own apps sometimes freeze while it warms up; wave the "isn't responding"
-    # popup away so it doesn't cover the app. Crashes of My Books itself are caught from logcat.
+    # popup away so it doesn't cover the app. Crashes of Folio itself are caught from logcat.
     if grep -q 'text="Viewing full screen"' "$OUT/$1.xml"; then
       echo "(dismissing Android's full-screen tip)"
       adb shell input tap $(python3 "$HERE/find_text.py" "$OUT/$1.xml" "Got it")

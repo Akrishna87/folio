@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "MyBooks"
+rootProject.name = "Folio"
 include(":app")

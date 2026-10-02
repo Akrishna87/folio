@@ -1,6 +1,6 @@
-# 📚 My Books for Android
+# 📚 Folio for Android
 
-A free, Libby-style app for **public-domain audiobooks and ebooks**. Search,
+Folio is a free, Libby-style app for **public-domain audiobooks and ebooks**. Search,
 tap a book, then listen or read. Everything can be downloaded to read or
 listen offline. There are no accounts or ads, and every book comes from a
 catalog that gives it away legally:
@@ -18,15 +18,16 @@ if you're outside the USA.
 
 1. On your Android phone, open the
    [latest build](https://github.com/Akrishna87/Akrishna87/releases/tag/books-latest)
-   and tap **MyBooks.apk** to download it.
+   and tap **Folio.apk** to download it.
 2. Open the downloaded file. Android will ask you to allow installing apps
    from your browser (or Files app). Allow it, then tap **Install**.
    Google Play Protect may warn that it doesn't recognise the app, because
    it isn't from the Play Store. Tap **More details → Install anyway**.
-3. Open **My Books**.
+3. Open **Folio**.
 
-To update, install a newer `MyBooks.apk` the same way. It installs over the
-old one and keeps your shelf and your place in every book.
+To update, install a newer `Folio.apk` the same way. It installs over the
+old one and keeps your shelf and your place in every book. (Folio was called
+My Books in its first build; it installs over that too.)
 
 ## Features
 
@@ -59,7 +60,8 @@ old one and keeps your shelf and your place in every book.
 ## How it's built
 
 Kotlin and Jetpack Compose, with Media3 (ExoPlayer) for audio, Coil for
-covers and a WebView for the reader.
+covers and a WebView for the reader. The code still uses its first name,
+`mybooks`, as its package name, so that updates install over earlier builds.
 
 - `catalog/` searches the two catalogs and reads their answers. The
   Archive's search covers the LibriVox collection only, so nothing that isn't
@@ -69,11 +71,14 @@ covers and a WebView for the reader.
   styles chapters for the reader. `assets/reader.js` lays each chapter out
   as screen-sized pages.
 - `PlaybackService.kt` owns the player and the media session.
+- `ci/icon/gen.py` draws the launcher icon (an open book wearing
+  headphones). Run `python3 ci/icon/gen.py app/src/main/res <preview dir>`
+  after changing it.
 - `ci/smoke-test.sh` runs on an Android emulator for every build, against
   the real catalogs. It searches, reads the ebook and turns pages, streams
   the audiobook in the background, changes speed and checks the shelf.
   Screenshots from that run are attached to each release.
 
 Builds are made by the
-[Books app APK workflow](../.github/workflows/books-apk.yml) on every push
+[Folio APK workflow](../.github/workflows/books-apk.yml) on every push
 that touches `books-android/`.

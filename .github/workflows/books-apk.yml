@@ -1,4 +1,4 @@
-name: Books app APK
+name: Folio APK
 
 on:
   push:
@@ -32,11 +32,11 @@ jobs:
           VERSION_CODE: ${{ github.run_number }}
         run: ./gradlew --no-daemon --stacktrace testReleaseUnitTest assembleRelease
       - name: Name the APK
-        run: cp app/build/outputs/apk/release/app-release.apk MyBooks.apk
+        run: cp app/build/outputs/apk/release/app-release.apk Folio.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: MyBooks-apk
-          path: books-android/MyBooks.apk
+          name: Folio-apk
+          path: books-android/Folio.apk
 
   smoke-test:
     needs: build
@@ -45,7 +45,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: MyBooks-apk
+          name: Folio-apk
           path: apk
       - name: Enable KVM
         run: |
@@ -61,7 +61,7 @@ jobs:
           profile: pixel_6
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim -camera-back none
-          script: bash books-android/ci/smoke-test.sh apk/MyBooks.apk smoke-out
+          script: bash books-android/ci/smoke-test.sh apk/Folio.apk smoke-out
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -76,7 +76,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: MyBooks-apk
+          name: Folio-apk
           path: out
       - uses: actions/download-artifact@v4
         with:
@@ -88,8 +88,8 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           gh release delete books-latest --cleanup-tag --yes || true
-          gh release create books-latest out/MyBooks.apk out/screens/*.png \
+          gh release create books-latest out/Folio.apk out/screens/*.png \
             --target "$GITHUB_SHA" \
             --prerelease \
-            --title "My Books for Android (build ${{ github.run_number }})" \
-            --notes "Download **MyBooks.apk** on your Android phone, open it, and allow installing from your browser when asked. Each new build installs as an update over the last one. The PNG files are screenshots from the automatic emulator test of this build."
+            --title "Folio for Android (build ${{ github.run_number }})" \
+            --notes "Download **Folio.apk** on your Android phone, open it, and allow installing from your browser when asked. Each new build installs as an update over the last one. The PNG files are screenshots from the automatic emulator test of this build."
