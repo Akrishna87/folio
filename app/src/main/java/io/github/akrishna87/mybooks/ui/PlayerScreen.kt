@@ -158,7 +158,7 @@ fun PlayerScreen(vm: BooksViewModel) {
             title = "Playback speed",
             options = SPEEDS.map { speedLabel(it) },
             selected = SPEEDS.indexOf(vm.speed),
-            onPick = { vm.setSpeed(SPEEDS[it]); showSpeed = false },
+            onPick = { vm.changeSpeed(SPEEDS[it]); showSpeed = false },
             onDismiss = { showSpeed = false },
         )
     }

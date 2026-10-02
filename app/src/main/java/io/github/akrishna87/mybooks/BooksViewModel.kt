@@ -562,7 +562,7 @@ class BooksViewModel(app: Application) : AndroidViewModel(app) {
         resume(it)
     }
 
-    fun setSpeed(value: Float) {
+    fun changeSpeed(value: Float) {
         PlaybackService.saveSpeed(context, value)
         speed = value
         controller?.setPlaybackSpeed(value)
