@@ -26,6 +26,12 @@ dump() {
     adb shell uiautomator dump /sdcard/ui.xml > /dev/null 2>&1 && adb pull /sdcard/ui.xml "$OUT/$1.xml" > /dev/null 2>&1 || { sleep 2; continue; }
     # The emulator's own apps sometimes freeze while it warms up; wave the "isn't responding"
     # popup away so it doesn't cover the app. Crashes of My Books itself are caught from logcat.
+    if grep -q 'text="Viewing full screen"' "$OUT/$1.xml"; then
+      echo "(dismissing Android's full-screen tip)"
+      adb shell input tap $(python3 "$HERE/find_text.py" "$OUT/$1.xml" "Got it")
+      sleep 2
+      continue
+    fi
     grep -q "isn&apos;t responding\|isn't responding" "$OUT/$1.xml" || return 0
     echo "(dismissing a system 'isn't responding' popup)"
     python3 "$HERE/find_text.py" "$OUT/$1.xml" "Wait" > /dev/null 2>&1 && adb shell input tap $(python3 "$HERE/find_text.py" "$OUT/$1.xml" "Wait")
@@ -56,6 +62,8 @@ hide_keyboard() { if adb shell dumpsys input_method | grep -q "mInputShown=true"
 adb wait-for-device
 adb install -r "$APK"
 adb shell settings put global hide_error_dialogs 1 || true
+# Skip Android's one-time "Viewing full screen" tip, which the reader would otherwise trigger.
+adb shell settings put secure immersive_mode_confirmations confirmed || true
 adb logcat -c
 
 SIZE=$(screen_size); W=${SIZE%x*}; H=${SIZE#*x}
