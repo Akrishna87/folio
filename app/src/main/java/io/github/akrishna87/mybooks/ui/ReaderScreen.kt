@@ -10,6 +10,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.webkit.JavascriptInterface
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
@@ -149,7 +150,15 @@ internal class ReaderController(private val context: Context, private val vm: Bo
         return ((spineIndex + within) / n).coerceIn(0f, 1f)
     }
 
-    fun intercept(url: Uri): WebResourceResponse {
+    fun intercept(url: Uri): WebResourceResponse = try {
+        serve(url)
+    } catch (e: Exception) {
+        // A broken file in the book (or the book closing mid-load) shouldn't take the app down.
+        android.util.Log.w("MyBooks", "Couldn't serve $url", e)
+        notFound()
+    }
+
+    private fun serve(url: Uri): WebResourceResponse {
         if (url.host != HOST) return notFound() // the reader never loads anything from the internet
         val path = url.path.orEmpty().trimStart('/')
         if (path == SCRIPT_PATH) {
@@ -276,11 +285,18 @@ fun ReaderScreen(vm: BooksViewModel, bookId: String) {
             ) {
                 Text(controller.error.orEmpty(), color = textColor)
                 Spacer(Modifier.height(16.dp))
-                Button(onClick = { vm.back() }) { Text("Back") }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedButton(onClick = { vm.back() }) { Text("Back", color = textColor) }
+                    if (epub != null) Button(onClick = { controller.error = null }) { Text("Try again") }
+                }
             }
             epub == null -> CircularProgressIndicator(Modifier.align(Alignment.Center))
             else -> AndroidView(
                 modifier = Modifier.fillMaxSize().displayCutoutPadding(),
+                onRelease = { wv ->
+                    if (controller.webView === wv) controller.webView = null
+                    wv.destroy()
+                },
                 factory = { ctx ->
                     WebView(ctx).apply {
                         setBackgroundColor(background.toArgb())
@@ -298,6 +314,15 @@ fun ReaderScreen(vm: BooksViewModel, bookId: String) {
                         webViewClient = object : WebViewClient() {
                             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse =
                                 controller.intercept(request.url)
+
+                            // If the page's renderer dies (out of memory, say), Android would close the whole
+                            // app unless we say we've handled it.
+                            override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                                android.util.Log.w("MyBooks", "Reader renderer gone (crashed=${detail.didCrash()})")
+                                if (controller.webView === view) controller.webView = null
+                                controller.error = "The page couldn't be shown."
+                                return true
+                            }
 
                             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                                 val url = request.url

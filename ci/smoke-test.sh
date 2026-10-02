@@ -18,6 +18,9 @@ fail() {
     echo "On screen:"; grep -o 'text="[^"]\+"' "$OUT/failure.xml" | head -60 || true
   fi
   adb logcat -d > "$OUT/logcat.txt" || true
+  echo "Crashes and errors from the app:"
+  grep -A 40 "FATAL EXCEPTION" "$OUT/logcat.txt" | head -80 || true
+  grep -E " E (AndroidRuntime|chromium|cr_|WebView)" "$OUT/logcat.txt" | tail -20 || true
   exit 1
 }
 dump() {
