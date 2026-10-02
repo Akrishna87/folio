@@ -33,6 +33,7 @@ dump() {
   done
 }
 shot() { adb exec-out screencap -p > "$OUT/$1.png"; }
+show() { echo "  on screen: $(grep -o 'text="[^"]\+"' "$OUT/$1.xml" | sed 's/^text=//' | head -40 | tr '\n' ' ')"; }
 tap() { # tap <dump name> <text> [first|last]
   local xy
   xy=$(python3 "$HERE/find_text.py" "$OUT/$1.xml" "$2" "${3:-first}") || fail "couldn't find '$2' on screen"
@@ -65,12 +66,13 @@ wait_for home 'text="Popular audiobooks"' 30 "Home doesn't show 'Popular audiobo
 sleep 15 # let the catalogs answer
 dump home
 shot 1-home
+show home
 grep -q 'text="Popular ebooks"' "$OUT/home.xml" || fail "Home doesn't show 'Popular ebooks'"
 grep -q "Couldn't reach\|No internet" "$OUT/home.xml" && echo "WARNING: a catalog didn't answer on Home"
 echo "PASS: Home screen"
 
 echo "--- Searching"
-tap home "Search"
+tap home "Search" last # the tab, not a link on Home
 sleep 2
 dump search
 grep -q 'text="Browse by subject"' "$OUT/search.xml" || fail "Search doesn't show the subject tiles"
@@ -81,28 +83,25 @@ adb shell input keyevent KEYCODE_ENTER
 sleep 3
 hide_keyboard
 wait_for results 'text="Pride and Prejudice"' 90 "searching didn't find Pride and Prejudice"
-# Both catalogs should have answered.
-wait_for results 'text="Ebooks"' 10 "no ebook section"
-for _ in $(seq 1 20); do
-  dump results
-  grep -q 'content-desc="Audiobook"\|text="Audiobook"' "$OUT/results.xml" && grep -q 'text="Ebook"' "$OUT/results.xml" && break
-  sleep 3
-done
 shot 2-search-results
+show results
 grep -q 'text="Audiobook"' "$OUT/results.xml" || fail "no audiobook results"
-grep -q 'text="Ebook"' "$OUT/results.xml" || fail "no ebook results"
-echo "PASS: search finds audiobooks and ebooks"
+echo "PASS: search finds audiobooks"
 
 echo "--- Reading the ebook"
 tap results "Ebooks"
 sleep 2
-wait_for ebooks 'text="Pride and Prejudice"' 30 "the Ebooks filter lost the results"
+wait_for ebooks 'text="Ebook"' 60 "no ebook results"
+show ebooks
+echo "PASS: search finds ebooks"
+grep -q 'text="Pride and Prejudice"' "$OUT/ebooks.xml" || fail "the ebook results have no Pride and Prejudice"
 tap ebooks "Pride and Prejudice"
 wait_for ebook-page 'text="Read"' 20 "the ebook page has no Read button"
 shot 3-ebook-page
 tap ebook-page "Read"
 wait_for reader 'text="Page 1 of [0-9]+"' 90 "the reader didn't open the book at page 1"
 sleep 2
+show reader
 shot 4-reader-first
 # Turn pages by tapping the right side of the screen.
 for _ in $(seq 1 6); do adb shell input tap $((W * 9 / 10)) $((H / 2)); sleep 2; done
@@ -139,6 +138,7 @@ wait_for audiobooks 'text="Pride and Prejudice"' 30 "the Audiobooks filter has n
 tap audiobooks "Pride and Prejudice"
 wait_for audio-page 'text="Parts"' 60 "the audiobook's parts didn't load"
 shot 8-audiobook-page
+show audio-page
 grep -Eq 'text="Download · [0-9.,]+ [MG]B"' "$OUT/audio-page.xml" || fail "the Download button doesn't show the size"
 tap audio-page "Play"
 for _ in $(seq 1 30); do playing && break; sleep 2; done

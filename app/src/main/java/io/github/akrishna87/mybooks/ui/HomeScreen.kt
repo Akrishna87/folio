@@ -82,9 +82,9 @@ fun HomeScreen(vm: BooksViewModel) {
                 }
             }
         }
-        item { SectionTitle("Popular audiobooks", action = "Search") { vm.filter = io.github.akrishna87.mybooks.SearchFilter.AUDIOBOOKS; vm.selectSection(Section.SEARCH) } }
+        item { SectionTitle("Popular audiobooks", action = "More") { vm.filter = io.github.akrishna87.mybooks.SearchFilter.AUDIOBOOKS; vm.selectSection(Section.SEARCH) } }
         item { BookRowOf(vm, vm.popularAudio) }
-        item { SectionTitle("Popular ebooks", action = "Search") { vm.filter = io.github.akrishna87.mybooks.SearchFilter.EBOOKS; vm.selectSection(Section.SEARCH) } }
+        item { SectionTitle("Popular ebooks", action = "More") { vm.filter = io.github.akrishna87.mybooks.SearchFilter.EBOOKS; vm.selectSection(Section.SEARCH) } }
         item { BookRowOf(vm, vm.popularEbooks) }
         item { SectionTitle("Browse") }
         item { SubjectGrid(vm) }
