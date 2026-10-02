@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- An open book with a sound wave over it, scaled into the adaptive-icon safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+    <group
+        android:pivotX="256"
+        android:pivotY="256"
+        android:scaleX="0.62"
+        android:scaleY="0.62">
+        <!-- left and right pages -->
+        <path
+            android:pathData="M256,196 C214,166 160,158 104,166 L104,356 C160,348 214,356 256,386 Z"
+            android:strokeWidth="26"
+            android:strokeColor="#FFFFFF"
+            android:strokeLineJoin="round" />
+        <path
+            android:pathData="M256,196 C298,166 352,158 408,166 L408,356 C352,348 298,356 256,386 Z"
+            android:strokeWidth="26"
+            android:strokeColor="#FFFFFF"
+            android:strokeLineJoin="round" />
+        <!-- sound wave above the book -->
+        <path
+            android:pathData="M196,120 L196,92 M226,128 L226,72 M256,132 L256,52 M286,128 L286,72 M316,120 L316,92"
+            android:strokeWidth="22"
+            android:strokeColor="#FFFFFF"
+            android:strokeLineCap="round" />
+    </group>
+</vector>
