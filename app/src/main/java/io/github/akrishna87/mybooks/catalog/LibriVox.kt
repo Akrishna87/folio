@@ -90,7 +90,9 @@ object LibriVox {
             ?: byFormat.values.maxByOrNull { it.size }
             ?: emptyList()
         val chapters = chosen
-            .sortedWith(compareBy<JSONObject>({ trackNumber(it.optString("track")) }, { it.optString("name") }))
+            // LibriVox numbers its files in reading order ("book_01_author_64kb.mp3"); the track tags
+            // inside the files are less reliable, so they only break ties.
+            .sortedWith(compareBy<JSONObject, String>(NaturalOrder) { it.optString("name") }.thenBy { trackNumber(it.optString("track")) })
             .map { f ->
                 val name = f.optString("name")
                 Chapter(
@@ -101,6 +103,26 @@ object LibriVox {
                 )
             }
         return AudioDetails(htmlToText(firstString(meta, "description")), chapters)
+    }
+
+    /** Compares text with numbers in it by the numbers' values, so "part_2" comes before "part_10". */
+    object NaturalOrder : Comparator<String> {
+        private val chunks = Regex("\\d+|\\D+")
+        override fun compare(a: String, b: String): Int {
+            val x = chunks.findAll(a.lowercase()).map { it.value }.toList()
+            val y = chunks.findAll(b.lowercase()).map { it.value }.toList()
+            for (i in 0 until minOf(x.size, y.size)) {
+                val p = x[i]
+                val q = y[i]
+                val c = if (p[0].isDigit() && q[0].isDigit()) {
+                    p.trimStart('0').length.compareTo(q.trimStart('0').length).takeIf { it != 0 } ?: p.trimStart('0').compareTo(q.trimStart('0'))
+                } else {
+                    p.compareTo(q)
+                }
+                if (c != 0) return c
+            }
+            return x.size.compareTo(y.size)
+        }
     }
 
     /** "01", "1/61" and "" all sort sensibly. */

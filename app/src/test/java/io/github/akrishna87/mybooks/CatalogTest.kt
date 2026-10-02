@@ -129,6 +129,12 @@ class CatalogTest {
         """.trimIndent()
         val d = LibriVox.parseMetadata("pp", json)
         assertEquals(listOf("Chapter 1", "Chapter 2", "pp 03 austen"), d.chapters.map { it.title })
+        // File names decide the order, even when the track tags disagree.
+        val tagged = LibriVox.parseMetadata("x", """{"files": [
+            {"name": "b_10_a_64kb.mp3", "format": "64Kbps MP3", "track": "1", "title": "Ten"},
+            {"name": "b_2_a_64kb.mp3", "format": "64Kbps MP3", "track": "3", "title": "Two"},
+            {"name": "b_01_a_64kb.mp3", "format": "64Kbps MP3", "track": "2", "title": "One"}]}""")
+        assertEquals(listOf("One", "Two", "Ten"), tagged.chapters.map { it.title })
         assertEquals("https://archive.org/download/pp/pp_01_austen_64kb.mp3", d.chapters[0].url)
         assertEquals("https://archive.org/download/pp/pp_03%20austen_64kb.mp3", d.chapters[2].url)
         assertEquals(600.0, d.chapters[1].durationSec, 0.01)

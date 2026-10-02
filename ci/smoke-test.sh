@@ -39,7 +39,7 @@ dump() {
   done
 }
 shot() { adb exec-out screencap -p > "$OUT/$1.png"; }
-show() { echo "  on screen: $(grep -o 'text="[^"]\+"' "$OUT/$1.xml" | sed 's/^text=//' | head -40 | tr '\n' ' ')"; }
+show() { echo "  on screen: $(tr '\n' ' ' < "$OUT/$1.xml" | grep -o 'text="[^"]\+"' | sed 's/^text=//' | head -40 | tr '\n' ' ')"; }
 tap() { # tap <dump name> <text> [first|last]
   local xy
   xy=$(python3 "$HERE/find_text.py" "$OUT/$1.xml" "$2" "${3:-first}") || fail "couldn't find '$2' on screen"
@@ -145,10 +145,9 @@ tap results-again "Audiobooks"
 sleep 2
 wait_for audiobooks 'text="Pride and Prejudice"' 30 "the Audiobooks filter has no Pride and Prejudice"
 tap audiobooks "Pride and Prejudice"
-wait_for audio-page 'text="Parts"' 60 "the audiobook's parts didn't load"
+wait_for audio-page 'text="Download · [0-9.,]+ [MG]B"' 60 "the audiobook's parts didn't load"
 shot 8-audiobook-page
 show audio-page
-grep -Eq 'text="Download · [0-9.,]+ [MG]B"' "$OUT/audio-page.xml" || fail "the Download button doesn't show the size"
 tap audio-page "Play"
 for _ in $(seq 1 30); do playing && break; sleep 2; done
 playing || fail "the audiobook didn't start playing"
