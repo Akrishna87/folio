@@ -78,7 +78,8 @@ dump search
 grep -q 'text="Browse by subject"' "$OUT/search.xml" || fail "Search doesn't show the subject tiles"
 tap search "Title or author"
 sleep 1
-adb shell input text "pride%sand%sprejudice"
+# Not the exact title: the matcher ignores case and would tap the search box instead.
+adb shell input text "pride%sprejudice"
 adb shell input keyevent KEYCODE_ENTER
 sleep 3
 hide_keyboard
