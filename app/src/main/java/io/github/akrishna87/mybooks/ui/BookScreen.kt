@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.akrishna87.mybooks.BooksViewModel
 import io.github.akrishna87.mybooks.Load
+import io.github.akrishna87.mybooks.catalog.AudioDetails
 import io.github.akrishna87.mybooks.catalog.Book
 import io.github.akrishna87.mybooks.catalog.Chapter
 import io.github.akrishna87.mybooks.catalog.Kind
@@ -41,8 +42,8 @@ fun BookScreen(vm: BooksViewModel, found: Book) {
     val item = vm.shelfItem(found.id)
     val book = item?.book?.takeIf { it.description.isNotEmpty() } ?: vm.ebookDetails[found.id] ?: item?.book ?: found
     val details = vm.audioDetails[found.id]
-    val chapters: List<Chapter> = item?.chapters?.takeIf { it.isNotEmpty() } ?: (details as? Load.Ready)?.value?.chapters.orEmpty()
-    val description = book.description.ifEmpty { (details as? Load.Ready)?.value?.description.orEmpty() }
+    val chapters: List<Chapter> = item?.chapters?.takeIf { it.isNotEmpty() } ?: (details as? Load.Ready<AudioDetails>)?.value?.chapters.orEmpty()
+    val description = book.description.ifEmpty { (details as? Load.Ready<AudioDetails>)?.value?.description.orEmpty() }
     var confirm by remember { mutableStateOf<Confirm?>(null) }
     val context = LocalContext.current
     val tint = placeholderColor(book.title)

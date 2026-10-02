@@ -22,6 +22,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -407,7 +408,7 @@ private fun TocPanel(epub: Epub, controller: ReaderController, theme: ReaderThem
                 .align(Alignment.BottomCenter)
                 .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
                 .background(parseColor(theme.background))
-                .clickable(enabled = false) {}
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {} // taps on the panel stay on it
                 .navigationBarsPadding(),
         ) {
             Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -452,7 +453,7 @@ private fun StylePanel(settings: ReaderSettings, onChange: (ReaderSettings) -> U
                 .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
                 .background(parseColor(theme.background))
                 .border(1.dp, parseColor(theme.faint), RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
-                .clickable(enabled = false) {}
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {} // taps on the panel stay on it
                 .navigationBarsPadding()
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),

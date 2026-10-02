@@ -245,7 +245,7 @@ class BooksViewModel(app: Application) : AndroidViewModel(app) {
         if (shelfItem(book.id) != null) {
             removeFromShelf(book.id)
         } else {
-            val details = (audioDetails[book.id] as? Load.Ready)?.value
+            val details = (audioDetails[book.id] as? Load.Ready<AudioDetails>)?.value
             ensureOnShelf(ebookDetails[book.id] ?: book, details)
             say("Saved to your shelf")
         }
@@ -282,7 +282,7 @@ class BooksViewModel(app: Application) : AndroidViewModel(app) {
     // ----- Downloads -----
 
     fun downloadAudio(book: Book) {
-        val details = (audioDetails[book.id] as? Load.Ready)?.value
+        val details = (audioDetails[book.id] as? Load.Ready<AudioDetails>)?.value
         val item = ensureOnShelf(book, details)
         if (item.chapters.isEmpty()) {
             say("Still loading the chapters. Try again in a moment.")
