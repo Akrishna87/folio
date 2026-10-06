@@ -17,7 +17,7 @@ if you're outside the USA.
 ## Installing it
 
 1. On your Android phone, open the
-   [latest build](https://github.com/Akrishna87/Akrishna87/releases/tag/books-latest)
+   [latest build](https://github.com/Akrishna87/folio/releases/tag/books-latest)
    and tap **Folio.apk** to download it.
 2. Open the downloaded file. Android will ask you to allow installing apps
    from your browser (or Files app). Allow it, then tap **Install**.
@@ -80,5 +80,5 @@ covers and a WebView for the reader. The code still uses its first name,
   Screenshots from that run are attached to each release.
 
 Builds are made by the
-[Folio APK workflow](../.github/workflows/books-apk.yml) on every push
-that touches `books-android/`.
+[Folio APK workflow](.github/workflows/books-apk.yml) on every push
+to this repo.
