@@ -129,12 +129,12 @@ adb shell input tap $((W / 2)) $((H / 2))
 sleep 2
 dump reader-menu
 shot 6-reader-menu
-WHERE=$(grep -oE 'text="(Part [0-9]+ of [0-9]+|Page [0-9]+ of [0-9]+)"' "$OUT/reader-menu.xml" | tr '\n' ' ')
+WHERE=$(grep -oE 'text="(Part [0-9]+ of [0-9]+|Page [0-9]+ of [0-9]+)"' "$OUT/reader-menu.xml" | tr '\n' ' ' || true)
 echo "  reader shows: $WHERE"
 # A chapter of text should fill a sensible number of pages. When pages are sized from a wrong
 # (tiny) screen height, each holds a line or two and a chapter runs to hundreds of pages.
-PAGES=$(grep -oE 'text="Page [0-9]+ of [0-9]+"' "$OUT/reader-menu.xml" | grep -oE '[0-9]+"' | tr -d '"' | head -1)
-PART=$(grep -oE 'text="Part [0-9]+ of' "$OUT/reader-menu.xml" | grep -oE '[0-9]+' | head -1)
+PAGES=$(grep -oE 'text="Page [0-9]+ of [0-9]+"' "$OUT/reader-menu.xml" | grep -oE '[0-9]+"' | tr -d '"' | head -1 || true)
+PART=$(grep -oE 'text="Part [0-9]+ of' "$OUT/reader-menu.xml" | grep -oE '[0-9]+' | head -1 || true)
 if [ -n "$PAGES" ] && [ "${PART:-1}" -gt 1 ] && [ "$PAGES" -gt 80 ]; then
   fail "a chapter runs to $PAGES pages: each page holds far too little text"
 fi
