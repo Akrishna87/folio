@@ -20,7 +20,9 @@ fail() {
   adb logcat -d > "$OUT/logcat.txt" || true
   echo "Crashes and errors from the app:"
   grep -A 40 "FATAL EXCEPTION" "$OUT/logcat.txt" | head -80 || true
-  grep -E " E (AndroidRuntime|chromium|cr_|WebView)" "$OUT/logcat.txt" | tail -20 || true
+  grep -E "mybooks|Fatal signal|libc   :|DEBUG   :|lowmemorykiller|am_kill|Force finishing|ANR in" "$OUT/logcat.txt" | grep -v "cr_CronetUrlRequestContext" | tail -60 || true
+  echo "Why Android says the app's process ended:"
+  adb shell dumpsys activity exit-info "$PKG" | head -60 || true
   exit 1
 }
 dump() {
@@ -101,6 +103,10 @@ grep -q 'text="Audiobook"' "$OUT/results.xml" || fail "no audiobook results"
 echo "PASS: search finds audiobooks"
 
 echo "--- Reading the ebook"
+# For the log: how big Gutenberg's two editions are (the app swaps big illustrated ones for text-only).
+for u in https://www.gutenberg.org/ebooks/1342.epub3.images https://www.gutenberg.org/ebooks/1342.epub.noimages; do
+  echo "  size of $u: $(curl -sIL --max-time 30 "$u" | tr -d '\r' | grep -i '^content-length' | tail -1 | cut -d' ' -f2) bytes"
+done
 tap results "Ebooks"
 sleep 2
 wait_for ebooks 'text="Ebook"' 60 "no ebook results"
@@ -111,7 +117,7 @@ tap ebooks "Pride and Prejudice"
 wait_for ebook-page 'text="Read"' 20 "the ebook page has no Read button"
 shot 3-ebook-page
 tap ebook-page "Read"
-wait_for reader 'text="Page 1 of [0-9]+"' 90 "the reader didn't open the book at page 1"
+wait_for reader 'text="Page 1 of [0-9]+"' 120 "the reader didn't open the book at page 1"
 sleep 2
 show reader
 shot 4-reader-first

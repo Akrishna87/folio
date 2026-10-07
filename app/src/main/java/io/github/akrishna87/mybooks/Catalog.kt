@@ -50,6 +50,8 @@ object Catalog {
         LibriVox.parseMetadata(book.sourceId, Http.get(LibriVox.metadataUrl(book.sourceId)))
     }
 
+    fun textOnlyEpub(url: String): String? = Gutenberg.textOnlyEpub(url)
+
     /** Fills in what an ebook found through the fallback catalog is missing (its summary). */
     suspend fun ebookDetails(book: Book): Book? = withContext(Dispatchers.IO) {
         try {

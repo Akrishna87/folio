@@ -30,6 +30,16 @@ object Gutenberg {
         "$SITE/ebooks/search.opds/?sort_order=downloads&start_index=${1 + (page - 1) * OPDS_PAGE_SIZE}"
 
     fun epubUrl(number: String) = "$SITE/ebooks/$number.epub3.images"
+
+    private val ILLUSTRATED_EPUB = Regex("^https://www\\.gutenberg\\.org/ebooks/(\\d+)\\.epub3?\\.images$")
+
+    /**
+     * The text-only edition of an illustrated Gutenberg EPUB, or null if [url] isn't one. Some
+     * illustrated editions are tens of megabytes (Pride and Prejudice has over 160 drawings),
+     * while the text-only one is usually under 1 MB.
+     */
+    fun textOnlyEpub(url: String): String? =
+        ILLUSTRATED_EPUB.find(url)?.groupValues?.get(1)?.let { "$SITE/ebooks/$it.epub.noimages" }
     fun coverUrl(number: String) = "$SITE/cache/epub/$number/pg$number.cover.medium.jpg"
     fun pageUrl(number: String) = "$SITE/ebooks/$number"
 

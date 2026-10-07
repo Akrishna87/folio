@@ -222,21 +222,44 @@ private fun AudioActions(vm: BooksViewModel, book: Book, chapters: List<Chapter>
 private fun EbookActions(vm: BooksViewModel, book: Book, ask: (Confirm) -> Unit) {
     val item = vm.shelfItem(book.id)
     val busy = book.id in vm.fetching
+    if (busy) {
+        val (done, total) = vm.fetchProgress[book.id] ?: (0L to -1L)
+        Button(onClick = {}, enabled = false, modifier = Modifier.fillMaxWidth().height(52.dp), shape = CircleShape) {
+            Text(
+                when {
+                    done == 0L -> "Getting the book…"
+                    total > 0 -> "Downloading ${(done * 100 / total).toInt()}%"
+                    else -> "Downloading ${formatBytes(done)}"
+                },
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp,
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        if (total > 0) {
+            LinearProgressIndicator(progress = { (done.toFloat() / total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp))
+        } else {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp))
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (total > 0) "${formatBytes(done)} of ${formatBytes(total)}" else "",
+                color = Palette.SubText,
+                fontSize = 12.sp,
+                modifier = Modifier.weight(1f).padding(start = 24.dp),
+            )
+            TextButton(onClick = { vm.cancelEbookDownload(book.id) }) { Text("Cancel") }
+        }
+        return
+    }
     Button(
         onClick = { vm.openEbook(book) },
-        enabled = !busy,
         modifier = Modifier.fillMaxWidth().height(52.dp),
         shape = CircleShape,
     ) {
-        if (busy) {
-            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-            Spacer(Modifier.width(10.dp))
-            Text("Getting the book…", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-        } else {
-            Icon(Icons.Rounded.AutoStories, contentDescription = null)
-            Spacer(Modifier.width(8.dp))
-            Text(if (item != null && vm.progressOf(item) > 0f) "Continue reading" else "Read", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-        }
+        Icon(Icons.Rounded.AutoStories, contentDescription = null)
+        Spacer(Modifier.width(8.dp))
+        Text(if (item != null && vm.progressOf(item) > 0f) "Continue reading" else "Read", fontWeight = FontWeight.Bold, fontSize = 16.sp)
     }
     if (item?.downloaded == true) {
         Spacer(Modifier.height(10.dp))
@@ -252,7 +275,7 @@ private fun EbookActions(vm: BooksViewModel, book: Book, ask: (Confirm) -> Unit)
     } else {
         Spacer(Modifier.height(6.dp))
         Text(
-            "Reading downloads the book (usually under 1 MB) so it works offline.",
+            "Reading downloads the book so it works offline. Very large illustrated editions are swapped for the text-only one.",
             color = Palette.Faint,
             fontSize = 12.sp,
             textAlign = TextAlign.Center,

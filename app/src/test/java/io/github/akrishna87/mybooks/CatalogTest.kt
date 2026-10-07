@@ -49,6 +49,14 @@ class CatalogTest {
     }
 
     @Test
+    fun textOnlyEditionOfIllustratedEbooks() {
+        assertEquals("https://www.gutenberg.org/ebooks/1342.epub.noimages", Gutenberg.textOnlyEpub("https://www.gutenberg.org/ebooks/1342.epub3.images"))
+        assertEquals("https://www.gutenberg.org/ebooks/84.epub.noimages", Gutenberg.textOnlyEpub("https://www.gutenberg.org/ebooks/84.epub.images"))
+        assertEquals(null, Gutenberg.textOnlyEpub("https://www.gutenberg.org/ebooks/1342.epub.noimages"))
+        assertEquals(null, Gutenberg.textOnlyEpub("https://example.org/ebooks/1342.epub3.images"))
+    }
+
+    @Test
     fun gutenbergOpdsFallback() {
         val xml = """
             <?xml version="1.0" encoding="UTF-8"?>
