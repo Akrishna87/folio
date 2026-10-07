@@ -20,7 +20,9 @@ fail() {
   adb logcat -d > "$OUT/logcat.txt" || true
   echo "Crashes and errors from the app:"
   grep -A 40 "FATAL EXCEPTION" "$OUT/logcat.txt" | head -80 || true
-  grep -E " E (AndroidRuntime|chromium|cr_|WebView)" "$OUT/logcat.txt" | tail -20 || true
+  grep -E "mybooks|Fatal signal|libc   :|DEBUG   :|lowmemorykiller|am_kill|Force finishing|ANR in" "$OUT/logcat.txt" | grep -v "cr_CronetUrlRequestContext" | tail -60 || true
+  echo "Why Android says the app's process ended:"
+  adb shell dumpsys activity exit-info "$PKG" | head -60 || true
   exit 1
 }
 dump() {
