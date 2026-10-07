@@ -85,6 +85,7 @@ object Http {
                 } catch (e: IOException) {
                     // Only a drop part way through is worth another go; HTTP errors are thrown by open().
                     if (++retries > 3) throw DownloadInterrupted(e)
+                    android.util.Log.i("Folio", "Download of $url dropped at ${part.length()} bytes (${e.message}); retrying")
                     Thread.sleep(1_500L * retries)
                 } finally {
                     c.disconnect()

@@ -20,7 +20,7 @@ fail() {
   adb logcat -d > "$OUT/logcat.txt" || true
   echo "Crashes and errors from the app:"
   grep -A 40 "FATAL EXCEPTION" "$OUT/logcat.txt" | head -80 || true
-  grep -E "mybooks|Fatal signal|libc   :|DEBUG   :|lowmemorykiller|am_kill|Force finishing|ANR in" "$OUT/logcat.txt" | grep -v "cr_CronetUrlRequestContext" | tail -60 || true
+  grep -E "mybooks|Folio|Fatal signal|libc   :|DEBUG   :|lowmemorykiller|am_kill|Force finishing|ANR in" "$OUT/logcat.txt" | grep -v "cr_CronetUrlRequestContext" | tail -60 || true
   echo "Why Android says the app's process ended:"
   adb shell dumpsys activity exit-info "$PKG" | head -60 || true
   exit 1
@@ -131,9 +131,18 @@ tap ebooks "Pride and Prejudice"
 wait_for ebook-page 'text="Read"' 20 "the ebook page has no Read button"
 shot 3-ebook-page
 tap ebook-page "Read"
+RETAPPED=no
 for _ in $(seq 1 40); do
   dump reader
   grep -Eq 'text="Page [0-9]+ of [0-9]+"' "$OUT/reader.xml" && break
+  # Say what the app says (a download error shows for a few seconds at the bottom).
+  grep -oE 'text="[^"]*(Couldn|stalled|dropping|No internet|Downloading|Getting the book|text-only)[^"]*"' "$OUT/reader.xml" | head -2 | sed 's/^/  app says: /' || true
+  # The download ended without opening the book: try again once, as a person would.
+  if [ "$RETAPPED" = no ] && grep -q 'text="Read"' "$OUT/reader.xml" && ! grep -q 'Getting the book\|Downloading' "$OUT/reader.xml"; then
+    RETAPPED=yes
+    echo "  (the Read button came back without the book opening; tapping it again)"
+    tap reader "Read"
+  fi
   if revive_if_killed; then
     dump revived
     tap revived "Shelf"

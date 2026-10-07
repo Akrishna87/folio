@@ -385,6 +385,7 @@ class BooksViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                android.util.Log.w("Folio", "Couldn't download ${book.id} from $url", e)
                 say(
                     when {
                         e is java.net.UnknownHostException -> "No internet connection"
