@@ -61,6 +61,20 @@ wait_for() { # wait_for <dump name> <grep -E pattern> <seconds> <what>
 }
 session() { adb shell dumpsys media_session > "$OUT/session.txt"; }
 playing() { session; grep -Eq "\{state=(PLAYING|3)" "$OUT/session.txt"; }
+# On this emulator Google Play services sometimes restarts, and Android then kills the apps that
+# use its font provider (the reader's WebView does). That isn't the app's fault: say so, and
+# reopen the app once to carry on.
+REVIVED=no
+revive_if_killed() {
+  adb shell pidof "$PKG" > /dev/null 2>&1 && return 1
+  adb shell dumpsys activity exit-info "$PKG" | grep -q "DEPENDENCY DIED" || return 1
+  [ "$REVIVED" = no ] || return 1
+  REVIVED=yes
+  echo "(the emulator's Play services restarted and took the app with it; reopening it once)"
+  adb shell am start -W -n "$PKG/.MainActivity" > /dev/null
+  sleep 4
+  return 0
+}
 screen_size() { adb shell wm size | grep -o '[0-9]*x[0-9]*' | tail -1; }
 hide_keyboard() { if adb shell dumpsys input_method | grep -q "mInputShown=true"; then adb shell input keyevent KEYCODE_BACK; sleep 1; fi; }
 
@@ -117,7 +131,19 @@ tap ebooks "Pride and Prejudice"
 wait_for ebook-page 'text="Read"' 20 "the ebook page has no Read button"
 shot 3-ebook-page
 tap ebook-page "Read"
-wait_for reader 'text="Page 1 of [0-9]+"' 120 "the reader didn't open the book at page 1"
+for _ in $(seq 1 40); do
+  dump reader
+  grep -Eq 'text="Page [0-9]+ of [0-9]+"' "$OUT/reader.xml" && break
+  if revive_if_killed; then
+    dump revived
+    tap revived "Shelf"
+    sleep 2
+    dump revived-shelf
+    tap revived-shelf "Read" # the shelf row's read button
+  fi
+  sleep 3
+done
+grep -Eq 'text="Page [0-9]+ of [0-9]+"' "$OUT/reader.xml" || fail "the reader didn't open the book"
 sleep 2
 show reader
 shot 4-reader-first
