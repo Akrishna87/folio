@@ -21,6 +21,7 @@ import io.github.akrishna87.mybooks.catalog.AudioDetails
 import io.github.akrishna87.mybooks.catalog.Book
 import io.github.akrishna87.mybooks.catalog.Kind
 import io.github.akrishna87.mybooks.catalog.Query
+import io.github.akrishna87.mybooks.catalog.formatBytes
 import io.github.akrishna87.mybooks.epub.ReaderFont
 import io.github.akrishna87.mybooks.epub.ReaderSettings
 import io.github.akrishna87.mybooks.epub.ReaderTheme
@@ -29,6 +30,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.launch
@@ -57,6 +59,9 @@ data class Results(
     val loading: Boolean = false,
     val error: String? = null,
 )
+
+/** Above this, an illustrated ebook is swapped for its text-only edition. */
+const val LARGE_EPUB = 15_000_000L
 
 val SPEEDS = listOf(0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f, 2.5f)
 
@@ -213,6 +218,9 @@ class BooksViewModel(app: Application) : AndroidViewModel(app) {
     val downloads = mutableStateMapOf<String, DownloadState>()
     /** Ebooks being fetched before they open. */
     val fetching = mutableStateListOf<String>()
+    /** How far each ebook download has got: (bytes so far, total bytes or -1). */
+    val fetchProgress = mutableStateMapOf<String, Pair<Long, Long>>()
+    private val fetchJobs = HashMap<String, Job>()
     /** Bumped whenever reading or listening progress may have moved, so progress bars refresh. */
     var progressTick by mutableIntStateOf(0); private set
 
@@ -349,18 +357,54 @@ class BooksViewModel(app: Application) : AndroidViewModel(app) {
         val url = full.fileUrl ?: return say("This ebook has no EPUB to download")
         if (book.id in fetching) return
         fetching += book.id
-        viewModelScope.launch {
+        fetchProgress[book.id] = 0L to -1L
+        fetchJobs[book.id] = viewModelScope.launch {
             try {
-                withContext(Dispatchers.IO) { Http.download(url, file) }
+                var skippedBytes = 0L
+                withContext(Dispatchers.IO) {
+                    val scope = this
+                    val report = { done: Long, total: Long ->
+                        scope.ensureActive() // stops reading as soon as the download is cancelled
+                        fetchProgress[book.id] = done to total
+                    }
+                    // Illustrated editions can be huge; past LARGE_EPUB, get the text-only one instead.
+                    val textOnly = Catalog.textOnlyEpub(url)
+                    val gotIllustrated = Http.download(url, file, accept = { size ->
+                        val ok = textOnly == null || size <= LARGE_EPUB
+                        if (!ok) skippedBytes = size
+                        ok
+                    }, onProgress = report)
+                    if (!gotIllustrated && textOnly != null) Http.download(textOnly, file, onProgress = report)
+                }
+                if (skippedBytes > 0) {
+                    say("Got the text-only edition: the illustrated one is ${formatBytes(skippedBytes)}")
+                }
                 ensureOnShelf(full)
                 update(book.id) { it.copy(downloaded = true, openedAt = System.currentTimeMillis()) }
                 if (screens.lastOrNull().let { it is Screen.BookPage && it.book.id == book.id }) open(Screen.Reader(book.id))
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                say(if (e is java.io.IOException && e.message?.startsWith("HTTP") == true) "Couldn't download this ebook" else friendlyError(e))
+                say(
+                    when {
+                        e is java.net.UnknownHostException -> "No internet connection"
+                        e is java.net.SocketTimeoutException -> "The download stalled. Check your connection and tap Read to try again."
+                        e is Http.DownloadInterrupted -> "The connection kept dropping. Tap Read to try again."
+                        // Say what actually went wrong, so a problem can be reported and fixed.
+                        else -> "Couldn't download this ebook (${e.message ?: e.javaClass.simpleName}). Tap Read to try again."
+                    },
+                )
             } finally {
                 fetching -= book.id
+                fetchProgress.remove(book.id)
+                fetchJobs.remove(book.id)
             }
         }
+    }
+
+    fun cancelEbookDownload(id: String) {
+        fetchJobs[id]?.cancel()
+        say("Download stopped")
     }
 
     fun deleteEbook(id: String) {
