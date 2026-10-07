@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
+import androidx.core.view.doOnLayout
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import io.github.akrishna87.mybooks.BookFiles
@@ -340,7 +341,9 @@ fun ReaderScreen(vm: BooksViewModel, bookId: String) {
                             }
                         }
                         controller.webView = this
-                        controller.openAtSavedPlace()
+                        // Load once the WebView has its real size, so the first layout of the
+                        // chapter isn't done for a screen of the wrong height.
+                        doOnLayout { controller.openAtSavedPlace() }
                     }
                 },
             )

@@ -14,8 +14,23 @@
 
   function body() { return document.body; }
 
+  function viewWidth() { return document.documentElement.clientWidth || window.innerWidth || 0; }
+  function viewHeight() { return window.innerHeight || document.documentElement.clientHeight || 0; }
+
+  // A WebView can lay the page out before it has its real size, when the screen height is still
+  // tiny; pages sized from that hold one line each. So the page size is set in pixels from the
+  // measured screen (see readerCss), and only once the screen has a believable size.
+  function sizeKnown() { return viewWidth() > 100 && viewHeight() > 200; }
+
+  function applySize() {
+    var html = document.documentElement;
+    html.style.setProperty('--page-w', viewWidth() + 'px');
+    html.style.setProperty('--page-h', viewHeight() + 'px');
+  }
+
   function measure() {
-    width = document.documentElement.clientWidth || window.innerWidth || 1;
+    applySize();
+    width = viewWidth() || 1;
     var b = body();
     if (!b) return;
     var t = b.style.transform;
@@ -60,8 +75,13 @@
     try { return decodeURIComponent((hash || '').replace(/^#/, '')); } catch (e) { return ''; }
   }
 
+  var waits = 0;
   function onReady() {
     if (ready) return;
+    if (!sizeKnown() && waits++ < 50) { // wait up to 5 s for the screen size
+      setTimeout(onReady, 100);
+      return;
+    }
     ready = true;
     measure();
     var start = R ? String(R.start()) : '';
@@ -112,6 +132,13 @@
   });
 
   window.addEventListener('resize', function () { if (ready) relayout(); });
+  // Some WebViews change size without a resize event; check now and then too.
+  var lastSize = '';
+  setInterval(function () {
+    var size = viewWidth() + 'x' + viewHeight();
+    if (ready && sizeKnown() && size !== lastSize) relayout();
+    lastSize = size;
+  }, 1000);
   window.addEventListener('load', function () { setTimeout(onReady, 30); });
   // Don't wait forever for a slow or broken image.
   document.addEventListener('DOMContentLoaded', function () { setTimeout(onReady, 1500); });
