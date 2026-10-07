@@ -20,7 +20,7 @@ fail() {
   adb logcat -d > "$OUT/logcat.txt" || true
   echo "Crashes and errors from the app:"
   grep -A 40 "FATAL EXCEPTION" "$OUT/logcat.txt" | head -80 || true
-  grep -E "mybooks|Fatal signal|libc   :|DEBUG   :|lowmemorykiller|am_kill|Force finishing|ANR in" "$OUT/logcat.txt" | grep -v "cr_CronetUrlRequestContext" | tail -60 || true
+  grep -E "mybooks|Folio|Fatal signal|libc   :|DEBUG   :|lowmemorykiller|am_kill|Force finishing|ANR in" "$OUT/logcat.txt" | grep -v "cr_CronetUrlRequestContext" | tail -60 || true
   echo "Why Android says the app's process ended:"
   adb shell dumpsys activity exit-info "$PKG" | head -60 || true
   exit 1
@@ -61,6 +61,20 @@ wait_for() { # wait_for <dump name> <grep -E pattern> <seconds> <what>
 }
 session() { adb shell dumpsys media_session > "$OUT/session.txt"; }
 playing() { session; grep -Eq "\{state=(PLAYING|3)" "$OUT/session.txt"; }
+# On this emulator Google Play services sometimes restarts, and Android then kills the apps that
+# use its font provider (the reader's WebView does). That isn't the app's fault: say so, and
+# reopen the app once to carry on.
+REVIVED=no
+revive_if_killed() {
+  adb shell pidof "$PKG" > /dev/null 2>&1 && return 1
+  adb shell dumpsys activity exit-info "$PKG" | grep -q "DEPENDENCY DIED" || return 1
+  [ "$REVIVED" = no ] || return 1
+  REVIVED=yes
+  echo "(the emulator's Play services restarted and took the app with it; reopening it once)"
+  adb shell am start -W -n "$PKG/.MainActivity" > /dev/null
+  sleep 4
+  return 0
+}
 screen_size() { adb shell wm size | grep -o '[0-9]*x[0-9]*' | tail -1; }
 hide_keyboard() { if adb shell dumpsys input_method | grep -q "mInputShown=true"; then adb shell input keyevent KEYCODE_BACK; sleep 1; fi; }
 
@@ -117,18 +131,49 @@ tap ebooks "Pride and Prejudice"
 wait_for ebook-page 'text="Read"' 20 "the ebook page has no Read button"
 shot 3-ebook-page
 tap ebook-page "Read"
-wait_for reader 'text="Page 1 of [0-9]+"' 120 "the reader didn't open the book at page 1"
+RETAPPED=no
+for _ in $(seq 1 40); do
+  dump reader
+  grep -Eq 'text="Page [0-9]+ of [0-9]+"' "$OUT/reader.xml" && break
+  # Say what the app says (a download error shows for a few seconds at the bottom).
+  grep -oE 'text="[^"]*(Couldn|stalled|dropping|No internet|Downloading|Getting the book|text-only)[^"]*"' "$OUT/reader.xml" | head -2 | sed 's/^/  app says: /' || true
+  # The download ended without opening the book: try again once, as a person would.
+  if [ "$RETAPPED" = no ] && grep -q 'text="Read"' "$OUT/reader.xml" && ! grep -q 'Getting the book\|Downloading' "$OUT/reader.xml"; then
+    RETAPPED=yes
+    echo "  (the Read button came back without the book opening; tapping it again)"
+    tap reader "Read"
+  fi
+  if revive_if_killed; then
+    dump revived
+    tap revived "Shelf"
+    sleep 2
+    dump revived-shelf
+    tap revived-shelf "Read" # the shelf row's read button
+  fi
+  sleep 3
+done
+grep -Eq 'text="Page [0-9]+ of [0-9]+"' "$OUT/reader.xml" || fail "the reader didn't open the book"
 sleep 2
 show reader
 shot 4-reader-first
 # Turn pages by tapping the right side of the screen.
 for _ in $(seq 1 6); do adb shell input tap $((W * 9 / 10)) $((H / 2)); sleep 2; done
 shot 5-reader-turned
+dump reader-turned
+PAGEINFO=$(grep -oE 'text="Page [0-9]+ of [0-9]+"' "$OUT/reader-turned.xml" | head -1 || true)
+echo "  after turning pages: $PAGEINFO"
+# A chapter of text should fill a sensible number of pages. When pages are sized from a wrong
+# (tiny) screen height, each holds a line or two and a chapter runs to hundreds of pages.
+PAGES=$(echo "$PAGEINFO" | grep -oE '[0-9]+"' | tr -d '"' || true)
+if [ -n "$PAGES" ] && [ "$PAGES" -gt 80 ]; then
+  fail "a chapter runs to $PAGES pages: each page holds far too little text"
+fi
 # Tap the middle for the menu, which says which part of the book this is.
 adb shell input tap $((W / 2)) $((H / 2))
 sleep 2
 dump reader-menu
 shot 6-reader-menu
+grep -Eq 'text="Part ([2-9]|[1-9][0-9]+) of [0-9]+"' "$OUT/reader-menu.xml" && echo "  reader shows: $(grep -oE 'text="Part [0-9]+ of [0-9]+"' "$OUT/reader-menu.xml" || true)"
 grep -q 'of the book' "$OUT/reader-menu.xml" || fail "tapping the middle didn't show the reader's menu"
 grep -Eq 'text="Part ([2-9]|[1-9][0-9]+) of [0-9]+"' "$OUT/reader-menu.xml" || grep -Eq 'text="Page ([2-9]|[1-9][0-9]+) of' "$OUT/reader-menu.xml" \
   || fail "tapping the right side didn't turn the page"

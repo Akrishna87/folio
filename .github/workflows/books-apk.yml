@@ -54,8 +54,12 @@ jobs:
         with:
           api-level: 34
           arch: x86_64
-          target: google_apis
+          # The plain image has no Google Play services. On the google_apis image, Play services
+          # kept dying under memory pressure and Android took Folio down with it, since the
+          # reader's WebView uses its font provider. Folio doesn't need Play services.
+          target: default
           profile: pixel_6
+          ram-size: 4096M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim -camera-back none
           script: bash ci/smoke-test.sh apk/Folio.apk smoke-out
