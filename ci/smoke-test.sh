@@ -129,6 +129,7 @@ adb shell input tap $((W / 2)) $((H / 2))
 sleep 2
 dump reader-menu
 shot 6-reader-menu
+show reader-menu
 grep -q 'of the book' "$OUT/reader-menu.xml" || fail "tapping the middle didn't show the reader's menu"
 grep -Eq 'text="Part ([2-9]|[1-9][0-9]+) of [0-9]+"' "$OUT/reader-menu.xml" || grep -Eq 'text="Page ([2-9]|[1-9][0-9]+) of' "$OUT/reader-menu.xml" \
   || fail "tapping the right side didn't turn the page"
