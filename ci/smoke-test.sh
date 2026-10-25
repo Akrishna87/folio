@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs inside the Android emulator job against the real catalogs: installs the APK, searches
 # for a book, reads the ebook (checking pages turn), streams the audiobook (checking it keeps
-# playing in the background) and checks both end up on the shelf.
+# playing in the background) and checks both end up on the shelf, with a bookmark and a collection.
 # Usage: smoke-test.sh <apk> <output dir>
 set -euo pipefail
 
@@ -76,6 +76,27 @@ revive_if_killed() {
   return 0
 }
 screen_size() { adb shell wm size | grep -o '[0-9]*x[0-9]*' | tail -1; }
+# Tap the middle of a reader page to show its menu (dumped as <name>). A link can sit under the
+# middle of the page and open in the browser instead; then come back and tap the blank margin
+# under the text (the page's bottom padding), where no link can be.
+open_reader_menu() {
+  local i y=$((H / 2))
+  for i in 1 2 3 4; do
+    adb shell input tap $((W / 2)) $y
+    sleep 2
+    dump "$1"
+    grep -q 'of the book' "$OUT/$1.xml" && return 0
+    # (Saved first: with pipefail, grep -q quitting early would fail the whole pipe.)
+    adb shell dumpsys window > "$OUT/window.txt" 2>/dev/null || true
+    if ! grep -qE "(mCurrentFocus|mFocusedApp).*$PKG" "$OUT/window.txt"; then
+      echo "  (the tap opened a link in the book; going back) $(grep -m1 -o 'mCurrentFocus=[^ ]* [^ ]* [^ }]*' "$OUT/window.txt" || true)"
+      adb shell input keyevent KEYCODE_BACK
+      sleep 2
+    fi
+    y=$((H - 70))
+  done
+  return 1
+}
 hide_keyboard() { if adb shell dumpsys input_method | grep -q "mInputShown=true"; then adb shell input keyevent KEYCODE_BACK; sleep 1; fi; }
 
 adb wait-for-device
@@ -86,6 +107,25 @@ adb shell settings put secure immersive_mode_confirmations confirmed || true
 adb logcat -c
 
 SIZE=$(screen_size); W=${SIZE%x*}; H=${SIZE#*x}
+
+# For the log: which certificate authority each catalog's HTTPS chain ends at, and whether this
+# phone's trust store has it (when it doesn't, Android refuses with "Trust anchor ... not found").
+for host in www.gutenberg.org gutendex.com archive.org; do
+  echo "--- Certificate chain of $host"
+  echo | openssl s_client -connect "$host:443" -servername "$host" -showcerts 2>/dev/null > "$OUT/chain-$host.txt" || true
+  grep -E '^ *[0-9]+ s:|^ *i:' "$OUT/chain-$host.txt" || true
+  last=$(awk '/BEGIN CERT/{c=""} {c=c $0 "\n"} /END CERT/{l=c} END{printf "%s", l}' "$OUT/chain-$host.txt")
+  issuer_hash=$(printf "%b" "$last" | openssl x509 -noout -issuer_hash_old 2>/dev/null || true)
+  echo "  top issuer: $(printf "%b" "$last" | openssl x509 -noout -issuer 2>/dev/null) (old hash $issuer_hash)"
+  adb shell "ls /apex/com.android.conscrypt/cacerts/ /system/etc/security/cacerts/ 2>/dev/null" > "$OUT/cacerts.txt" || true
+  if grep -q "^$issuer_hash\.[0-9]" "$OUT/cacerts.txt"; then
+    echo "  the phone trusts it"
+  else
+    echo "  the phone does NOT have this root; the runner's copy:"
+    root=$(printf "%b" "$last" | openssl x509 -noout -issuer_hash 2>/dev/null || true)
+    for f in /etc/ssl/certs/"$root".*; do [ -f "$f" ] && { openssl x509 -in "$f" -noout -subject -fingerprint -sha256 -enddate; cat "$f"; }; done
+  fi
+done
 
 echo "--- Launching the app (opens on Home)"
 adb shell am start -W -n "$PKG/.MainActivity"
@@ -156,9 +196,20 @@ grep -Eq 'text="Page [0-9]+ of [0-9]+"' "$OUT/reader.xml" || fail "the reader di
 sleep 2
 show reader
 shot 4-reader-first
-# Turn pages by tapping the right side of the screen.
-for _ in $(seq 1 6); do adb shell input tap $((W * 9 / 10)) $((H / 2)); sleep 2; done
+# Turn pages by tapping the right side of the screen. The book opens on a one-page part, so the
+# first tap turns into the next chapter: catch it mid-turn (it should slide, not go blank).
+adb shell input tap $((W * 9 / 10)) $((H / 2))
+sleep 0.4
+shot 4b-chapter-turn
+sleep 2
+for _ in $(seq 1 5); do adb shell input tap $((W * 9 / 10)) $((H / 2)); sleep 2; done
 shot 5-reader-turned
+# Drag a page slowly and catch it half-curled (the curl is the default page turn).
+adb shell input swipe $((W * 9 / 10)) $((H * 3 / 4)) $((W * 3 / 10)) $((H * 3 / 4)) 2500 &
+sleep 1.4
+shot 5b-page-curl
+wait
+sleep 2
 dump reader-turned
 PAGEINFO=$(grep -oE 'text="Page [0-9]+ of [0-9]+"' "$OUT/reader-turned.xml" | head -1 || true)
 echo "  after turning pages: $PAGEINFO"
@@ -169,9 +220,7 @@ if [ -n "$PAGES" ] && [ "$PAGES" -gt 80 ]; then
   fail "a chapter runs to $PAGES pages: each page holds far too little text"
 fi
 # Tap the middle for the menu, which says which part of the book this is.
-adb shell input tap $((W / 2)) $((H / 2))
-sleep 2
-dump reader-menu
+open_reader_menu reader-menu || true
 shot 6-reader-menu
 grep -Eq 'text="Part ([2-9]|[1-9][0-9]+) of [0-9]+"' "$OUT/reader-menu.xml" && echo "  reader shows: $(grep -oE 'text="Part [0-9]+ of [0-9]+"' "$OUT/reader-menu.xml" || true)"
 grep -q 'of the book' "$OUT/reader-menu.xml" || fail "tapping the middle didn't show the reader's menu"
@@ -186,10 +235,101 @@ sleep 2
 shot 7-reader-sepia
 adb shell input keyevent KEYCODE_BACK # close the panel
 sleep 1
+dump reader-bm
+grep -q 'content-desc="Add bookmark"' "$OUT/reader-bm.xml" || open_reader_menu reader-bm || true
+tap reader-bm "Add bookmark"
+sleep 2
+dump reader-bm2
+tap reader-bm2 "Contents"
+sleep 2
+dump toc
+tap toc "Bookmarks"
+sleep 2
+dump bookmarks
+shot 7b-bookmarks
+show bookmarks
+grep -q 'No bookmarks yet' "$OUT/bookmarks.xml" && fail "the bookmark didn't show in the Bookmarks list"
+grep -q 'content-desc="Remove bookmark"' "$OUT/bookmarks.xml" || fail "the Bookmarks list has no bookmark"
+echo "PASS: bookmarks"
+adb shell input keyevent KEYCODE_BACK # close the panel
+sleep 1
+
+# Search in the book, and open a result.
+dump reader-s
+grep -q 'content-desc="Search in book"' "$OUT/reader-s.xml" || open_reader_menu reader-s || true
+tap reader-s "Search in book"
+sleep 2
+adb shell input text "Bennet"
+adb shell input keyevent KEYCODE_ENTER
+sleep 1
+hide_keyboard
+wait_for search-results 'text="[0-9]+\+? match(es)?"' 60 "searching the book found nothing for 'Bennet'"
+shot 7c-search
+echo "  $(grep -oE 'text="[0-9]+\+? match(es)?"' "$OUT/search-results.xml" | head -1)"
+tap search-results "Bennet " # a result (the search box says just "Bennet")
+sleep 3
+dump after-search
+grep -q 'Search in this book' "$OUT/after-search.xml" && fail "tapping a search result didn't go to it"
+echo "PASS: search in the book"
+
+# Press and hold a word to select it, then highlight it green.
+dump before-select
+SPOT=$(python3 "$HERE/word_spot.py" "$OUT/before-select.xml" "$H" || echo "$((W / 2)) $((H / 2))")
+echo "  pressing and holding at $SPOT"
+adb shell input swipe $SPOT $SPOT 1500
+sleep 2
+dump selection
+shot 7d-longpress
+if grep -q 'content-desc="Highlight green"' "$OUT/selection.xml"; then
+  grep -q 'text="Look up"' "$OUT/selection.xml" || fail "the selection toolbar has no Look up"
+  tap selection "Highlight green"
+  sleep 2
+  # Tapping the highlight opens its options.
+  adb shell input tap $SPOT
+  sleep 2
+  dump highlight-sheet
+  shot 7e-highlight
+  grep -q 'text="Add note"' "$OUT/highlight-sheet.xml" || fail "tapping the highlight didn't open its options"
+  adb shell input keyevent KEYCODE_BACK # close the options
+  sleep 1
+  # The highlight is listed under Highlights.
+  adb shell input tap $((W / 2)) $((H - 70))
+  sleep 2
+  dump reader-hl
+  tap reader-hl "Contents"
+  sleep 2
+  dump toc-hl
+  tap toc-hl "Highlights"
+  sleep 2
+  dump highlights
+  grep -q 'No highlights yet' "$OUT/highlights.xml" && fail "the highlight isn't in the Highlights list"
+  echo "PASS: highlights in colour"
+  adb shell input keyevent KEYCODE_BACK # close the panel
+  sleep 1
+else
+  echo "WARNING: pressing and holding didn't select any text here; skipping the highlight check"
+  show selection
+fi
 adb shell input keyevent KEYCODE_BACK # close the book
 sleep 2
 wait_for ebook-again 'text="Continue reading"' 15 "the ebook page doesn't offer 'Continue reading' after reading"
 echo "PASS: reading progress is remembered"
+tap ebook-again "Collections"
+sleep 2
+dump collections
+tap collections "New collection"
+sleep 1
+adb shell input text "Favourites"
+sleep 1
+hide_keyboard
+dump collections-typed
+tap collections-typed "Add"
+sleep 1
+dump collections-added
+grep -q 'text="Favourites"' "$OUT/collections-added.xml" || fail "the new collection isn't in the Collections dialog"
+tap collections-added "Done"
+sleep 1
+echo "PASS: a book can go in a collection"
 
 echo "--- Playing the audiobook"
 adb shell input keyevent KEYCODE_BACK # back to the results
@@ -209,6 +349,7 @@ echo "PASS: the audiobook streams"
 dump player
 shot 9-player
 grep -q 'LISTENING TO' "$OUT/player.xml" || fail "the full player didn't open"
+grep -q 'left in the book' "$OUT/player.xml" || fail "the player doesn't say how long is left in the book"
 tap player "1.0×"
 sleep 1
 dump speeds
@@ -240,11 +381,28 @@ dump shelf
 shot 11-shelf
 [ "$(grep -o 'text="Pride and Prejudice"' "$OUT/shelf.xml" | wc -l)" -ge 2 ] || fail "the shelf doesn't list both books"
 echo "PASS: both books are on the shelf"
+grep -q 'text="Favourites"' "$OUT/shelf.xml" || fail "the shelf has no 'Favourites' collection"
+tap shelf "Favourites"
+sleep 2
+dump shelf-collection
+grep -q 'text="1 in “Favourites”"' "$OUT/shelf-collection.xml" || fail "the 'Favourites' collection doesn't hold the ebook"
+echo "PASS: collections show on the shelf"
+tap shelf-collection "Show as grid"
+sleep 2
+dump shelf-grid
+shot 11b-shelf-grid
+grep -q 'Pride and Prejudice' "$OUT/shelf-grid.xml" || fail "the shelf's grid view shows no books"
+grep -q 'content-desc="Show as list"' "$OUT/shelf-grid.xml" || fail "the shelf didn't switch to the grid view"
+tap shelf-grid "Show as list"
+sleep 1
+echo "PASS: shelf grid view"
 tap shelf "Home"
 sleep 2
 dump home-after
 shot 12-home-after
 grep -q 'text="Continue"' "$OUT/home-after.xml" || fail "Home doesn't show 'Continue'"
+grep -q 'text="Reading Goals"' "$OUT/home-after.xml" || fail "Home doesn't show the reading goals"
+echo "  goals: $(grep -oE 'text="[^"]*(min to go|Goal met|minutes today|streak|this year)[^"]*"' "$OUT/home-after.xml" | tr '\n' ' ')"
 echo "PASS: Home offers to continue"
 
 if adb logcat -d | grep -q "FATAL EXCEPTION"; then

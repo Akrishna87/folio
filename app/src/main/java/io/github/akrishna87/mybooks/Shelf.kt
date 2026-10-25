@@ -3,6 +3,8 @@ package io.github.akrishna87.mybooks
 import android.content.Context
 import io.github.akrishna87.mybooks.catalog.Book
 import io.github.akrishna87.mybooks.catalog.Chapter
+import io.github.akrishna87.mybooks.epub.Marks
+import io.github.akrishna87.mybooks.stats.ReadingStats
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -19,6 +21,10 @@ data class ShelfItem(
     val downloadIds: List<Long> = emptyList(),
     /** Every file is on the phone. */
     val downloaded: Boolean = false,
+    /** Names of the collections the book is in. */
+    val collections: List<String> = emptyList(),
+    /** When you marked it finished (or reached its end); 0 if not finished. */
+    val finishedAt: Long = 0L,
 ) {
     val id: String get() = book.id
 
@@ -29,10 +35,13 @@ data class ShelfItem(
         .put("openedAt", openedAt)
         .put("downloadIds", JSONArray(downloadIds))
         .put("downloaded", downloaded)
+        .put("collections", JSONArray(collections))
+        .put("finishedAt", finishedAt)
 
     companion object {
         fun fromJson(o: JSONObject): ShelfItem {
             val ids = o.optJSONArray("downloadIds")
+            val cols = o.optJSONArray("collections")
             return ShelfItem(
                 book = Book.fromJson(o.getJSONObject("book")),
                 chapters = Chapter.listFromJson(o.optJSONArray("chapters")),
@@ -40,6 +49,8 @@ data class ShelfItem(
                 openedAt = o.optLong("openedAt"),
                 downloadIds = if (ids == null) emptyList() else List(ids.length()) { ids.getLong(it) },
                 downloaded = o.optBoolean("downloaded"),
+                collections = if (cols == null) emptyList() else List(cols.length()) { cols.getString(it) },
+                finishedAt = o.optLong("finishedAt"),
             )
         }
     }
@@ -101,6 +112,30 @@ object BookFiles {
     fun sizeOf(context: Context, id: String): Long = dir(context, id).walkTopDown().filter { it.isFile }.sumOf { it.length() }
 }
 
+/** Each ebook's bookmarks and highlights, one small JSON file per book. */
+object MarksStore {
+    private fun file(context: Context, id: String) =
+        File(File(context.filesDir, "marks"), id.replace(Regex("[^A-Za-z0-9._-]"), "_") + ".json")
+
+    fun load(context: Context, id: String): Marks = try {
+        Marks.fromJson(JSONObject(file(context, id).readText()))
+    } catch (e: Exception) {
+        Marks()
+    }
+
+    fun save(context: Context, id: String, marks: Marks) {
+        val f = file(context, id)
+        f.parentFile?.mkdirs()
+        val tmp = File(f.path + ".tmp")
+        tmp.writeText(marks.toJson().toString())
+        tmp.renameTo(f)
+    }
+
+    fun delete(context: Context, id: String) {
+        file(context, id).delete()
+    }
+}
+
 /**
  * Where you are in each book. Kept apart from the shelf because the player saves it every few
  * seconds. Audiobooks store (chapter, milliseconds); ebooks store (spine item, fraction of it).
@@ -134,5 +169,30 @@ object Progress {
 
     fun clear(context: Context, id: String) {
         prefs(context).edit().remove("pos:$id").remove("pct:$id").apply()
+    }
+}
+
+/** Reading and listening time per day, and the daily goal. Written by the reader and the player. */
+object StatsStore {
+    private fun prefs(context: Context) = context.getSharedPreferences("stats", Context.MODE_PRIVATE)
+
+    @Synchronized
+    fun load(context: Context): ReadingStats = try {
+        ReadingStats.fromJson(JSONObject(prefs(context).getString("stats", "{}") ?: "{}"))
+    } catch (e: Exception) {
+        ReadingStats()
+    }
+
+    @Synchronized
+    fun save(context: Context, stats: ReadingStats) {
+        prefs(context).edit().putString("stats", stats.toJson().toString()).apply()
+    }
+
+    /** Adds [seconds] of reading or listening to today. */
+    @Synchronized
+    fun add(context: Context, seconds: Int): ReadingStats {
+        val stats = load(context).add(java.time.LocalDate.now(), seconds)
+        save(context, stats)
+        return stats
     }
 }

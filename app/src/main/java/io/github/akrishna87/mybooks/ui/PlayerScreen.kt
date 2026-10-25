@@ -16,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -25,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.akrishna87.mybooks.BooksViewModel
 import io.github.akrishna87.mybooks.SPEEDS
+import io.github.akrishna87.mybooks.catalog.formatDuration
 import java.util.Locale
 
 /** "1.0×", "1.25×". */
@@ -39,6 +41,8 @@ fun PlayerScreen(vm: BooksViewModel) {
     var showChapters by remember { mutableStateOf(false) }
     var showSleep by remember { mutableStateOf(false) }
     var showSpeed by remember { mutableStateOf(false) }
+    var showSkips by remember { mutableStateOf(false) }
+    val context = androidx.compose.ui.platform.LocalContext.current
     var dragging by remember { mutableStateOf<Float?>(null) }
 
     Box(
@@ -59,6 +63,9 @@ fun PlayerScreen(vm: BooksViewModel) {
                 Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("LISTENING TO", style = MaterialTheme.typography.labelSmall, color = Palette.SubText)
                     Text(book.title, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                IconButton(onClick = { showSkips = true }, modifier = Modifier.offset(x = 12.dp)) {
+                    Icon(Icons.Rounded.Tune, "Skip lengths")
                 }
                 IconButton(onClick = { vm.openBook(book) }, modifier = Modifier.offset(x = 12.dp)) {
                     Icon(Icons.Rounded.Info, "About this book")
@@ -106,6 +113,16 @@ fun PlayerScreen(vm: BooksViewModel) {
                     fontSize = 12.sp,
                 )
             }
+            // Time left in the whole book, at the speed you're listening.
+            val bookLeft = vm.bookTimeLeftMs()
+            if (bookLeft > 0) {
+                Text(
+                    formatDuration(bookLeft / 1000.0 / vm.speed) + " left in the book" + if (vm.speed != 1f) " at ${speedLabel(vm.speed)}" else "",
+                    color = Palette.SubText,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
 
             Row(
                 Modifier.fillMaxWidth().padding(vertical = 8.dp),
@@ -113,7 +130,7 @@ fun PlayerScreen(vm: BooksViewModel) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(onClick = vm::previousChapter) { Icon(Icons.Rounded.SkipPrevious, "Previous part", modifier = Modifier.size(32.dp)) }
-                IconButton(onClick = vm::seekBack, modifier = Modifier.size(56.dp)) { Icon(Icons.Rounded.Replay10, "Back 10 seconds", modifier = Modifier.size(36.dp)) }
+                SkipButton(vm.skipBackSec, forward = false, onClick = { vm.seekBack() })
                 Box(
                     Modifier.size(72.dp).clip(CircleShape).background(Color.White).clickable(onClick = vm::togglePlay),
                     contentAlignment = Alignment.Center,
@@ -129,7 +146,7 @@ fun PlayerScreen(vm: BooksViewModel) {
                         )
                     }
                 }
-                IconButton(onClick = vm::seekForward, modifier = Modifier.size(56.dp)) { Icon(Icons.Rounded.Forward30, "Forward 30 seconds", modifier = Modifier.size(36.dp)) }
+                SkipButton(vm.skipForwardSec, forward = true, onClick = { vm.seekForward() })
                 IconButton(onClick = vm::nextChapter) { Icon(Icons.Rounded.SkipNext, "Next part", modifier = Modifier.size(32.dp)) }
             }
 
@@ -148,6 +165,7 @@ fun PlayerScreen(vm: BooksViewModel) {
                     "Sleep timer",
                     active = vm.sleepAtChapterEnd || vm.sleepLeftMs > 0,
                 ) { showSleep = true }
+                PlayerPill(Icons.Rounded.Headphones, "Output", "Play on another device") { openOutputSwitcher(context) }
                 PlayerPill(Icons.Rounded.FormatListNumbered, "Parts", "Parts") { showChapters = true }
             }
         }
@@ -160,6 +178,16 @@ fun PlayerScreen(vm: BooksViewModel) {
             selected = SPEEDS.indexOf(vm.speed),
             onPick = { vm.changeSpeed(SPEEDS[it]); showSpeed = false },
             onDismiss = { showSpeed = false },
+        )
+    }
+    if (showSkips) {
+        val choices = listOf(10 to 30, 15 to 15, 15 to 30, 30 to 30)
+        ChoiceDialog(
+            title = "Skip back / forward",
+            options = choices.map { "${it.first} seconds back, ${it.second} forward" },
+            selected = choices.indexOf(vm.skipBackSec to vm.skipForwardSec),
+            onPick = { vm.setSkips(choices[it].first, choices[it].second); showSkips = false },
+            onDismiss = { showSkips = false },
         )
     }
     if (showSleep) {
@@ -211,6 +239,38 @@ fun PlayerScreen(vm: BooksViewModel) {
     }
 }
 
+/** A circular arrow with the number of seconds it skips inside it. */
+@Composable
+private fun SkipButton(seconds: Int, forward: Boolean, onClick: () -> Unit) {
+    IconButton(onClick = onClick, modifier = Modifier.size(56.dp)) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                Icons.Rounded.Replay,
+                contentDescription = if (forward) "Forward $seconds seconds" else "Back $seconds seconds",
+                modifier = Modifier.size(40.dp).graphicsLayer { if (forward) scaleX = -1f },
+            )
+            Text("$seconds", fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 3.dp))
+        }
+    }
+}
+
+/** Android's own picker for where audio plays (phone speaker, Bluetooth headphones, a speaker…). */
+private fun openOutputSwitcher(context: android.content.Context) {
+    val intents = listOf(
+        android.content.Intent("com.android.settings.panel.action.MEDIA_OUTPUT")
+            .putExtra("com.android.settings.panel.extra.PACKAGE_NAME", context.packageName),
+        android.content.Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS),
+    )
+    for (intent in intents) {
+        try {
+            context.startActivity(intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            return
+        } catch (e: Exception) {
+            // try the next way
+        }
+    }
+}
+
 @Composable
 private fun PlayerPill(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, description: String, active: Boolean = false, onClick: () -> Unit) {
     Row(
@@ -218,7 +278,7 @@ private fun PlayerPill(icon: androidx.compose.ui.graphics.vector.ImageVector, la
             .clip(CircleShape)
             .background(if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.08f))
             .clickable(onClickLabel = description, onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 9.dp),
+            .padding(horizontal = 11.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp), tint = if (active) MaterialTheme.colorScheme.primary else Palette.Text)

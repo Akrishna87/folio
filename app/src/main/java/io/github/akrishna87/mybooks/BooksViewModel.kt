@@ -22,6 +22,7 @@ import io.github.akrishna87.mybooks.catalog.Book
 import io.github.akrishna87.mybooks.catalog.Kind
 import io.github.akrishna87.mybooks.catalog.Query
 import io.github.akrishna87.mybooks.catalog.formatBytes
+import io.github.akrishna87.mybooks.epub.PageTurn
 import io.github.akrishna87.mybooks.epub.ReaderFont
 import io.github.akrishna87.mybooks.epub.ReaderSettings
 import io.github.akrishna87.mybooks.epub.ReaderTheme
@@ -264,6 +265,7 @@ class BooksViewModel(app: Application) : AndroidViewModel(app) {
         AudioDownloads.cancel(context, item.downloadIds)
         BookFiles.delete(context, id)
         Progress.clear(context, id)
+        MarksStore.delete(context, id)
         downloads.remove(id)
         if (currentBookId == id) controller?.let { it.stop(); it.clearMediaItems() }
         saveShelf(shelf.filter { it.id != id })
@@ -271,6 +273,102 @@ class BooksViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun touch(id: String) = update(id) { it.copy(openedAt = System.currentTimeMillis()) }
+
+    // ----- Finished books and reading goals -----
+
+    /** Finished: marked so, or read or listened to the end. */
+    fun isFinished(item: ShelfItem) = item.finishedAt > 0 || progressOf(item) >= 0.995f
+
+    fun markFinished(id: String, finished: Boolean) {
+        update(id) { it.copy(finishedAt = if (finished) System.currentTimeMillis() else 0L) }
+        if (!finished && progressOf(shelfItem(id) ?: return) >= 0.995f) {
+            // "Still reading" after the last page: start it again from the beginning.
+            Progress.clear(context, id)
+            progressTick++
+        }
+        say(if (finished) "Marked as finished" else "Marked as not finished")
+    }
+
+    /** The last page of an ebook was turned. */
+    fun reachedEnd(id: String) {
+        if ((shelfItem(id)?.finishedAt ?: 0L) == 0L) {
+            update(id) { it.copy(finishedAt = System.currentTimeMillis()) }
+            say("You finished the book!")
+        } else {
+            say("That's the end of the book")
+        }
+    }
+
+    /** Books finished this calendar year. */
+    fun finishedThisYear(): Int {
+        val year = java.time.LocalDate.now().year
+        return shelf.count {
+            it.finishedAt > 0 && java.time.Instant.ofEpochMilli(it.finishedAt).atZone(java.time.ZoneId.systemDefault()).year == year
+        }
+    }
+
+    var stats by mutableStateOf(StatsStore.load(app)); private set
+
+    /** Picks up time the player added in the background. */
+    fun refreshStats() {
+        stats = StatsStore.load(context)
+    }
+
+    fun addReadingTime(seconds: Int) {
+        stats = StatsStore.add(context, seconds)
+    }
+
+    fun setDailyGoal(minutes: Int) {
+        stats = stats.copy(goalMinutes = minutes)
+        StatsStore.save(context, stats)
+        say("Daily goal: $minutes minutes")
+    }
+
+    // ----- Collections -----
+
+    /** Your collections' names, in the order you made them (kept even while empty). */
+    var collections by mutableStateOf(loadCollections()); private set
+
+    private fun loadCollections(): List<String> = try {
+        val arr = org.json.JSONArray(prefs.getString("collections", "[]"))
+        val saved = List(arr.length()) { arr.getString(it) }
+        // Collections named on books but missing from the list (shouldn't happen) still show.
+        (saved + shelf.flatMap { it.collections }).distinct()
+    } catch (e: Exception) {
+        emptyList()
+    }
+
+    private fun saveCollections(list: List<String>) {
+        collections = list
+        prefs.edit().putString("collections", org.json.JSONArray(list).toString()).apply()
+    }
+
+    /** Makes a collection, if there isn't one by that name already. Returns its name. */
+    fun createCollection(name: String): String? {
+        val clean = name.trim()
+        if (clean.isEmpty()) return null
+        collections.firstOrNull { it.equals(clean, ignoreCase = true) }?.let { return it }
+        saveCollections(collections + clean)
+        return clean
+    }
+
+    /** Puts [book] in [name], or takes it out if it's already there. */
+    fun toggleInCollection(book: Book, name: String) {
+        val inIt = shelfItem(book.id)?.collections?.contains(name) == true
+        if (inIt) {
+            update(book.id) { it.copy(collections = it.collections - name) }
+        } else {
+            val details = (audioDetails[book.id] as? Load.Ready<AudioDetails>)?.value
+            ensureOnShelf(ebookDetails[book.id] ?: book, details)
+            update(book.id) { it.copy(collections = it.collections + name) }
+        }
+    }
+
+    fun deleteCollection(name: String) {
+        saveCollections(collections - name)
+        saveShelf(shelf.map { if (name in it.collections) it.copy(collections = it.collections - name) else it })
+        say("Deleted the “$name” collection. Its books are still on your shelf.")
+    }
 
     /** How far through a book you are, 0..1. */
     fun progressOf(item: ShelfItem): Float {
@@ -424,6 +522,13 @@ class BooksViewModel(app: Application) : AndroidViewModel(app) {
             theme = ReaderTheme.entries.getOrElse(prefs.getInt("reader_theme", 0)) { ReaderTheme.LIGHT },
             font = ReaderFont.entries.getOrElse(prefs.getInt("reader_font", 0)) { ReaderFont.SERIF },
             textZoom = prefs.getInt("reader_zoom", 110),
+            lineHeight = prefs.getFloat("reader_line_height", 1.55f),
+            side = prefs.getInt("reader_side", 24),
+            justify = prefs.getBoolean("reader_justify", false),
+            bold = prefs.getBoolean("reader_bold", false),
+            // (A new key, so everyone starts with the page curl now that there is one.)
+            pageTurn = PageTurn.entries.getOrElse(prefs.getInt("reader_turn2", PageTurn.CURL.ordinal)) { PageTurn.CURL },
+            autoNight = prefs.getBoolean("reader_auto_night", false),
         ),
     ); private set
 
@@ -433,6 +538,12 @@ class BooksViewModel(app: Application) : AndroidViewModel(app) {
             .putInt("reader_theme", s.theme.ordinal)
             .putInt("reader_font", s.font.ordinal)
             .putInt("reader_zoom", s.textZoom)
+            .putFloat("reader_line_height", s.lineHeight)
+            .putInt("reader_side", s.side)
+            .putBoolean("reader_justify", s.justify)
+            .putBoolean("reader_bold", s.bold)
+            .putInt("reader_turn2", s.pageTurn.ordinal)
+            .putBoolean("reader_auto_night", s.autoNight)
             .apply()
     }
 
@@ -593,8 +704,31 @@ class BooksViewModel(app: Application) : AndroidViewModel(app) {
         if (c.isPlaying) c.pause() else resume(c)
     }
 
-    fun seekBack() = controller?.seekBack()
-    fun seekForward() = controller?.seekForward()
+    /** How far the player's skip buttons jump, in seconds. */
+    var skipBackSec by mutableIntStateOf(prefs.getInt("skip_back", 15)); private set
+    var skipForwardSec by mutableIntStateOf(prefs.getInt("skip_forward", 30)); private set
+
+    fun setSkips(back: Int, forward: Int) {
+        skipBackSec = back
+        skipForwardSec = forward
+        prefs.edit().putInt("skip_back", back).putInt("skip_forward", forward).apply()
+    }
+
+    fun seekBack() = controller?.let { it.seekTo((it.currentPosition - skipBackSec * 1000L).coerceAtLeast(0)) }
+    fun seekForward() = controller?.let {
+        val to = it.currentPosition + skipForwardSec * 1000L
+        if (it.duration > 0 && to >= it.duration && it.hasNextMediaItem()) it.seekToNextMediaItem() else it.seekTo(to)
+    }
+
+    /** Listening time left in the whole audiobook, at normal speed (0 if unknown). */
+    fun bookTimeLeftMs(): Long {
+        val item = currentItem ?: return 0
+        val chapters = item.chapters
+        if (chapters.isEmpty() || chapterIndex !in chapters.indices) return 0
+        val total = chapters.sumOf { it.durationSec } * 1000
+        val done = chapters.take(chapterIndex).sumOf { it.durationSec } * 1000 + positionMs
+        return (total - done).toLong().coerceAtLeast(0)
+    }
     fun seekTo(ms: Long) = controller?.seekTo(ms)
     fun nextChapter() = controller?.let { if (it.hasNextMediaItem()) it.seekToNextMediaItem() }
     fun previousChapter() = controller?.let {

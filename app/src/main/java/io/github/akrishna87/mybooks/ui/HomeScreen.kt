@@ -9,7 +9,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -24,6 +24,8 @@ import io.github.akrishna87.mybooks.Section
 import io.github.akrishna87.mybooks.catalog.Book
 import io.github.akrishna87.mybooks.catalog.Kind
 import io.github.akrishna87.mybooks.catalog.Query
+import io.github.akrishna87.mybooks.stats.ReadingStats
+import java.time.LocalDate
 import java.util.Calendar
 
 /** Subjects for the browse tiles: (label, what to search). */
@@ -53,7 +55,25 @@ fun BooksViewModel.resumeBook(book: Book) {
 
 @Composable
 fun HomeScreen(vm: BooksViewModel) {
-    val continuing = vm.shelf.filter { it.openedAt > 0 }.sortedByDescending { it.openedAt }.take(12)
+    val continuing = vm.shelf.filter { it.openedAt > 0 && !vm.isFinished(it) }.sortedByDescending { it.openedAt }.take(12)
+    val wantToRead = vm.shelf.filter { it.openedAt == 0L && !vm.isFinished(it) }.take(12)
+    var goalDialog by remember { mutableStateOf(false) }
+    // Listening in the background adds time too, so look again now and then.
+    LaunchedEffect(Unit) {
+        while (true) {
+            vm.refreshStats()
+            kotlinx.coroutines.delay(30_000)
+        }
+    }
+    if (goalDialog) {
+        ChoiceDialog(
+            title = "Daily reading goal",
+            options = ReadingStats.GOALS.map { "$it minutes a day" },
+            selected = ReadingStats.GOALS.indexOf(vm.stats.goalMinutes),
+            onPick = { vm.setDailyGoal(ReadingStats.GOALS[it]); goalDialog = false },
+            onDismiss = { goalDialog = false },
+        )
+    }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = LocalBottomSpace.current)) {
         item {
             Column(
@@ -72,6 +92,7 @@ fun HomeScreen(vm: BooksViewModel) {
                 )
             }
         }
+        item { GoalCard(vm) { goalDialog = true } }
         if (continuing.isNotEmpty()) {
             item { SectionTitle("Continue") }
             item {
@@ -79,6 +100,14 @@ fun HomeScreen(vm: BooksViewModel) {
                     items(continuing, key = { it.id }) { item ->
                         BookCard(item.book, onClick = { vm.resumeBook(item.book) }, progress = vm.progressOf(item))
                     }
+                }
+            }
+        }
+        if (wantToRead.isNotEmpty()) {
+            item { SectionTitle("Want to Read", action = "Shelf") { vm.selectSection(Section.SHELF) } }
+            item {
+                LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    items(wantToRead, key = { it.id }) { item -> BookCard(item.book, onClick = { vm.openBook(item.book) }) }
                 }
             }
         }
@@ -139,5 +168,85 @@ fun SubjectGrid(vm: BooksViewModel) {
                 if (pair.size == 1) Spacer(Modifier.weight(1f))
             }
         }
+    }
+}
+
+/** Today's reading against the daily goal, the streak, and the last seven days. Tap to change the goal. */
+@Composable
+private fun GoalCard(vm: BooksViewModel, onEditGoal: () -> Unit) {
+    val stats = vm.stats
+    val today = LocalDate.now()
+    val goalSec = stats.goalMinutes * 60
+    val todaySec = stats.seconds(today)
+    val fraction = (todaySec.toFloat() / goalSec).coerceIn(0f, 1f)
+    val streak = stats.streak(today)
+    val finished = vm.finishedThisYear()
+    Row(
+        Modifier
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Palette.Elevated)
+            .clickable(onClickLabel = "Change daily goal", onClick = onEditGoal)
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(76.dp), contentAlignment = Alignment.Center) {
+            androidx.compose.material3.CircularProgressIndicator(
+                progress = { fraction },
+                modifier = Modifier.fillMaxSize(),
+                color = if (fraction >= 1f) Palette.Teal else MaterialTheme.colorScheme.primary,
+                trackColor = Color.White.copy(alpha = 0.08f),
+                strokeWidth = 7.dp,
+            )
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("${todaySec / 60}", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                Text("of ${stats.goalMinutes} min", color = Palette.SubText, fontSize = 10.sp)
+            }
+        }
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f)) {
+            Text("Reading Goals", fontWeight = FontWeight.Bold)
+            Text(
+                when {
+                    fraction >= 1f -> "Goal met today. Nice!"
+                    todaySec == 0 -> "Read or listen for ${stats.goalMinutes} minutes today"
+                    else -> "${(goalSec - todaySec + 59) / 60} min to go today"
+                },
+                color = Palette.SubText,
+                fontSize = 13.sp,
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                GoalStat(if (streak == 1) "1 day" else "$streak days", "streak")
+                GoalStat("$finished", if (finished == 1) "book this year" else "books this year")
+            }
+            Spacer(Modifier.height(8.dp))
+            // The last seven days, today on the right; full bars met the goal.
+            val week = stats.week(today)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Bottom, modifier = Modifier.height(28.dp)) {
+                week.forEachIndexed { i, sec ->
+                    val day = today.minusDays((6 - i).toLong())
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(
+                            Modifier
+                                .width(10.dp)
+                                .height((4 + 14 * (sec.toFloat() / goalSec).coerceIn(0f, 1f)).dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(if (sec >= goalSec) Palette.Teal else if (sec > 0) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.12f)),
+                        )
+                        Text(day.dayOfWeek.name.take(1), color = if (i == 6) Palette.Text else Palette.Faint, fontSize = 9.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GoalStat(value: String, label: String) {
+    Column {
+        Text(value, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        Text(label, color = Palette.SubText, fontSize = 11.sp)
     }
 }
