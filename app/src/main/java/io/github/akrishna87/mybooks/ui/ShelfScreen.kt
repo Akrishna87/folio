@@ -80,6 +80,9 @@ fun ShelfScreen(vm: BooksViewModel) {
                             shape = CircleShape,
                         )
                     }
+                }
+                // Collections get a row of their own so they're in view, not past the filters.
+                if (vm.collections.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     vm.collections.forEach { name ->
                         FilterChip(
                             selected = collection == name,
