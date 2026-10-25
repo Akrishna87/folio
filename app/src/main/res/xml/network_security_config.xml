@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Everything is fetched over HTTPS; plain HTTP stays blocked. -->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="false" />
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+            <!-- gutenberg.org's certificate chains to this root, which some phones (the Android 14
+                 test emulator among them) don't have: ebook downloads failed with
+                 "Trust anchor for certification path not found". -->
+            <certificates src="@raw/ssl_com_tls_rsa_root_ca_2022" />
+        </trust-anchors>
+    </base-config>
 </network-security-config>
