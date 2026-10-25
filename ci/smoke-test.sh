@@ -87,6 +87,24 @@ adb logcat -c
 
 SIZE=$(screen_size); W=${SIZE%x*}; H=${SIZE#*x}
 
+# For the log: which certificate authority each catalog's HTTPS chain ends at, and whether this
+# phone's trust store has it (when it doesn't, Android refuses with "Trust anchor ... not found").
+for host in www.gutenberg.org gutendex.com archive.org; do
+  echo "--- Certificate chain of $host"
+  echo | openssl s_client -connect "$host:443" -servername "$host" -showcerts 2>/dev/null > "$OUT/chain-$host.txt" || true
+  grep -E '^ *[0-9]+ s:|^ *i:' "$OUT/chain-$host.txt" || true
+  last=$(awk '/BEGIN CERT/{c=""} {c=c $0 "\n"} /END CERT/{l=c} END{printf "%s", l}' "$OUT/chain-$host.txt")
+  issuer_hash=$(printf "%b" "$last" | openssl x509 -noout -issuer_hash_old 2>/dev/null || true)
+  echo "  top issuer: $(printf "%b" "$last" | openssl x509 -noout -issuer 2>/dev/null) (old hash $issuer_hash)"
+  if adb shell "ls /apex/com.android.conscrypt/cacerts/ /system/etc/security/cacerts/ 2>/dev/null" | grep -q "^$issuer_hash\.[0-9]"; then
+    echo "  the phone trusts it"
+  else
+    echo "  the phone does NOT have this root; the runner's copy:"
+    root=$(printf "%b" "$last" | openssl x509 -noout -issuer_hash 2>/dev/null || true)
+    for f in /etc/ssl/certs/"$root".*; do [ -f "$f" ] && { openssl x509 -in "$f" -noout -subject -fingerprint -sha256 -enddate; cat "$f"; }; done
+  fi
+done
+
 echo "--- Launching the app (opens on Home)"
 adb shell am start -W -n "$PKG/.MainActivity"
 wait_for home 'text="Popular audiobooks"' 30 "Home doesn't show 'Popular audiobooks'"
