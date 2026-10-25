@@ -277,15 +277,22 @@
 
   function fraction() { return pages > 1 ? page / (pages - 1) : 0; }
 
+  // Past the last (or first) page the app turns into the next (or previous) chapter. The page
+  // stays where the finger left it: the app covers it with a picture of itself and slides that
+  // away, or calls settle() if there's nowhere to go.
   function next() {
     if (page < pages - 1) show(page + 1, true);
-    else { place(-page * width, turn === 'slide'); if (R) R.next(); }
+    else if (R) R.next();
+    else settle();
   }
 
   function prev() {
     if (page > 0) show(page - 1, true);
-    else { place(-page * width, turn === 'slide'); if (R) R.prev(); }
+    else if (R) R.prev();
+    else settle();
   }
+
+  function settle() { place(-page * width, turn === 'slide'); }
 
   function relayout() {
     var f = fraction();
@@ -417,6 +424,7 @@
     unmark: function (id) { unmark(id); },
     setBookmarks: function (json) { bookmarks = parseList(json); if (ready) report(); },
     setTurn: function (style) { turn = style; },
+    settle: settle,
     goTo: function (offset) { show(pageOfOffset(offset)); },
     goToFraction: function (f) { show(Math.round(Math.max(0, Math.min(1, f)) * (pages - 1))); },
     find: function (start, end) { flash(start, end); show(pageOfOffset(start)); }

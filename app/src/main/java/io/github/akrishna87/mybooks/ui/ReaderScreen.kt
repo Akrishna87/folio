@@ -118,6 +118,11 @@ internal class ReaderController(private val context: Context, private val vm: Bo
     @Volatile var lastActivity = 0L
 
     var webView: WebView? = null
+    /** A picture of the last page, shown while the next chapter loads behind it (see [turnTo]). */
+    var cover: android.widget.ImageView? = null
+    /** +1 or -1 while a chapter loads behind [cover]; 0 otherwise. */
+    private var pendingTurn = 0
+    private val revealTimeout = Runnable { reveal() }
     private var files: ZipEpubFiles? = null
     private val main = Handler(Looper.getMainLooper())
 
@@ -161,6 +166,95 @@ internal class ReaderController(private val context: Context, private val vm: Bo
         spineIndex = index
         start = startAt
         webView?.loadUrl(BASE + encodePath(book.spine[index].path))
+    }
+
+    /**
+     * Turns into the next ([dir] = 1) or previous (-1) chapter like any other page: the page you
+     * were on stays on screen while the chapter loads behind it, then slides (or fades) away.
+     */
+    private fun turnTo(index: Int, startAt: String, dir: Int) {
+        val wv = webView
+        val cv = cover
+        if (wv == null || cv == null || wv.width == 0 || wv.height == 0) {
+            load(index, startAt)
+            return
+        }
+        pendingTurn = dir
+        snapshot(wv) { picture ->
+            if (picture != null && pendingTurn == dir) {
+                cv.animate().cancel()
+                cv.setImageBitmap(picture)
+                cv.translationX = 0f
+                cv.alpha = 1f
+                cv.visibility = View.VISIBLE
+                main.postDelayed(revealTimeout, 2_500) // a slow chapter shows anyway
+            } else {
+                pendingTurn = 0
+            }
+            load(index, startAt)
+        }
+    }
+
+    /** The pixels the WebView is showing right now, or null. */
+    private fun snapshot(wv: WebView, done: (android.graphics.Bitmap?) -> Unit) {
+        val bitmap = try {
+            android.graphics.Bitmap.createBitmap(wv.width, wv.height, android.graphics.Bitmap.Config.ARGB_8888)
+        } catch (e: OutOfMemoryError) {
+            return done(null)
+        }
+        val window = context.findActivity()?.window
+        if (window != null) {
+            val at = IntArray(2)
+            wv.getLocationInWindow(at)
+            val rect = android.graphics.Rect(at[0], at[1], at[0] + wv.width, at[1] + wv.height)
+            try {
+                android.view.PixelCopy.request(window, rect, bitmap, { result ->
+                    done(if (result == android.view.PixelCopy.SUCCESS) bitmap else drawn(wv, bitmap))
+                }, main)
+                return
+            } catch (e: Exception) {
+                // fall back to drawing it
+            }
+        }
+        done(drawn(wv, bitmap))
+    }
+
+    private fun drawn(wv: WebView, bitmap: android.graphics.Bitmap): android.graphics.Bitmap? = try {
+        wv.draw(android.graphics.Canvas(bitmap))
+        bitmap
+    } catch (e: Exception) {
+        null
+    }
+
+    /** The new chapter is laid out: move the old page out of the way. */
+    private fun reveal() {
+        main.removeCallbacks(revealTimeout)
+        val dir = pendingTurn
+        pendingTurn = 0
+        val cv = cover ?: return
+        if (cv.visibility != View.VISIBLE) return
+        val wv = webView
+        val done = {
+            cv.visibility = View.GONE
+            cv.setImageDrawable(null)
+            cv.translationX = 0f
+            cv.alpha = 1f
+            wv?.translationX = 0f
+        }
+        // Give the WebView a moment to paint the new page before uncovering it.
+        cv.postDelayed({
+            val w = cv.width.toFloat()
+            val ease = android.view.animation.DecelerateInterpolator(1.6f)
+            if (turnStyle == "none") {
+                done()
+            } else if (turnStyle == "slide" && dir != 0) {
+                wv?.translationX = dir * w
+                wv?.animate()?.translationX(0f)?.setDuration(300)?.setInterpolator(ease)?.start()
+                cv.animate().translationX(-dir * w).setDuration(300).setInterpolator(ease).withEndAction(done).start()
+            } else {
+                cv.animate().alpha(0f).setDuration(200).withEndAction(done).start()
+            }
+        }, 60)
     }
 
     fun loadEntry(path: String, fragment: String) {
@@ -405,6 +499,7 @@ internal class ReaderController(private val context: Context, private val vm: Bo
         fun onPage(p: Int, n: Int, startOffset: Int, bookmarkId: String, snippet: String) {
             lastActivity = System.currentTimeMillis()
             main.post {
+                if (pendingTurn != 0) reveal()
                 page = p
                 pages = n
                 pageStart = startOffset
@@ -418,14 +513,28 @@ internal class ReaderController(private val context: Context, private val vm: Bo
         @JavascriptInterface
         fun next() {
             main.post {
+                if (pendingTurn != 0) return@post // already turning
                 val book = epub
-                if (book != null && spineIndex < book.spine.lastIndex) load(spineIndex + 1) else vm.reachedEnd(bookId)
+                if (book != null && spineIndex < book.spine.lastIndex) {
+                    turnTo(spineIndex + 1, "", 1)
+                } else {
+                    settle()
+                    vm.reachedEnd(bookId)
+                }
             }
         }
 
         @JavascriptInterface
         fun prev() {
-            main.post { if (spineIndex > 0) load(spineIndex - 1, "end") }
+            main.post {
+                if (pendingTurn != 0) return@post
+                if (spineIndex > 0) turnTo(spineIndex - 1, "end", -1) else settle()
+            }
+        }
+
+        /** Nowhere to turn to: put the page back where it belongs. */
+        private fun settle() {
+            webView?.evaluateJavascript("window.__reader && window.__reader.settle()", null)
         }
 
         @JavascriptInterface
@@ -540,11 +649,16 @@ fun ReaderScreen(vm: BooksViewModel, bookId: String) {
             epub == null -> CircularProgressIndicator(Modifier.align(Alignment.Center))
             else -> AndroidView(
                 modifier = Modifier.fillMaxSize().displayCutoutPadding(),
-                onRelease = { wv ->
+                onRelease = { frame ->
+                    val wv = frame.getChildAt(0) as? WebView
                     if (controller.webView === wv) controller.webView = null
-                    wv.destroy()
+                    if (controller.cover === frame.getChildAt(1)) controller.cover = null
+                    wv?.destroy()
                 },
                 factory = { ctx ->
+                  android.widget.FrameLayout(ctx).apply {
+                    clipChildren = true
+                    addView(
                     // Selected text gets Folio's own toolbar (colours, note, copy, share, look up)
                     // instead of the system's menu. The system's action mode still starts (the
                     // WebView drops the selection if it can't), just with nothing in it.
@@ -597,7 +711,18 @@ fun ReaderScreen(vm: BooksViewModel, bookId: String) {
                         // Load once the WebView has its real size, so the first layout of the
                         // chapter isn't done for a screen of the wrong height.
                         doOnLayout { controller.openAtSavedPlace() }
-                    }
+                    }, android.widget.FrameLayout.LayoutParams(-1, -1)) // fill the frame
+                    // The last page of a chapter, shown over the reader while the next one loads.
+                    addView(
+                        android.widget.ImageView(ctx).apply {
+                            visibility = View.GONE
+                            scaleType = android.widget.ImageView.ScaleType.FIT_XY
+                            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                            controller.cover = this
+                        },
+                        android.widget.FrameLayout.LayoutParams(-1, -1),
+                    )
+                  }
                 },
             )
         }

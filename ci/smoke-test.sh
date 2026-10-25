@@ -196,8 +196,13 @@ grep -Eq 'text="Page [0-9]+ of [0-9]+"' "$OUT/reader.xml" || fail "the reader di
 sleep 2
 show reader
 shot 4-reader-first
-# Turn pages by tapping the right side of the screen.
-for _ in $(seq 1 6); do adb shell input tap $((W * 9 / 10)) $((H / 2)); sleep 2; done
+# Turn pages by tapping the right side of the screen. The book opens on a one-page part, so the
+# first tap turns into the next chapter: catch it mid-turn (it should slide, not go blank).
+adb shell input tap $((W * 9 / 10)) $((H / 2))
+sleep 0.4
+shot 4b-chapter-turn
+sleep 2
+for _ in $(seq 1 5); do adb shell input tap $((W * 9 / 10)) $((H / 2)); sleep 2; done
 shot 5-reader-turned
 dump reader-turned
 PAGEINFO=$(grep -oE 'text="Page [0-9]+ of [0-9]+"' "$OUT/reader-turned.xml" | head -1 || true)
