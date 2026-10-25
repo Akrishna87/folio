@@ -76,6 +76,25 @@ revive_if_killed() {
   return 0
 }
 screen_size() { adb shell wm size | grep -o '[0-9]*x[0-9]*' | tail -1; }
+# Tap the middle of a reader page to show its menu (dumped as <name>). A link can sit under the
+# middle of the page and open in the browser instead; then come back, turn the page and try again.
+open_reader_menu() {
+  local i
+  for i in 1 2 3 4; do
+    adb shell input tap $((W / 2)) $((H / 2))
+    sleep 2
+    dump "$1"
+    grep -q 'of the book' "$OUT/$1.xml" && return 0
+    if ! adb shell dumpsys window | grep -E 'mCurrentFocus|mFocusedApp' | grep -q "$PKG"; then
+      echo "  (the tap opened a link in the book; going back and turning the page)"
+      adb shell input keyevent KEYCODE_BACK
+      sleep 2
+    fi
+    adb shell input tap $((W * 9 / 10)) $((H / 2))
+    sleep 2
+  done
+  return 1
+}
 hide_keyboard() { if adb shell dumpsys input_method | grep -q "mInputShown=true"; then adb shell input keyevent KEYCODE_BACK; sleep 1; fi; }
 
 adb wait-for-device
@@ -187,9 +206,7 @@ if [ -n "$PAGES" ] && [ "$PAGES" -gt 80 ]; then
   fail "a chapter runs to $PAGES pages: each page holds far too little text"
 fi
 # Tap the middle for the menu, which says which part of the book this is.
-adb shell input tap $((W / 2)) $((H / 2))
-sleep 2
-dump reader-menu
+open_reader_menu reader-menu || true
 shot 6-reader-menu
 grep -Eq 'text="Part ([2-9]|[1-9][0-9]+) of [0-9]+"' "$OUT/reader-menu.xml" && echo "  reader shows: $(grep -oE 'text="Part [0-9]+ of [0-9]+"' "$OUT/reader-menu.xml" || true)"
 grep -q 'of the book' "$OUT/reader-menu.xml" || fail "tapping the middle didn't show the reader's menu"
@@ -205,7 +222,7 @@ shot 7-reader-sepia
 adb shell input keyevent KEYCODE_BACK # close the panel
 sleep 1
 dump reader-bm
-grep -q 'content-desc="Add bookmark"' "$OUT/reader-bm.xml" || { adb shell input tap $((W / 2)) $((H / 2)); sleep 2; dump reader-bm; }
+grep -q 'content-desc="Add bookmark"' "$OUT/reader-bm.xml" || open_reader_menu reader-bm || true
 tap reader-bm "Add bookmark"
 sleep 2
 dump reader-bm2
