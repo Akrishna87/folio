@@ -85,7 +85,9 @@ open_reader_menu() {
     sleep 2
     dump "$1"
     grep -q 'of the book' "$OUT/$1.xml" && return 0
-    if ! adb shell dumpsys window | grep -E 'mCurrentFocus|mFocusedApp' | grep -q "$PKG"; then
+    # (Saved first: with pipefail, grep -q quitting early would fail the whole pipe.)
+    adb shell dumpsys window > "$OUT/window.txt" 2>/dev/null || true
+    if ! grep -qE "(mCurrentFocus|mFocusedApp).*$PKG" "$OUT/window.txt"; then
       echo "  (the tap opened a link in the book; going back and turning the page)"
       adb shell input keyevent KEYCODE_BACK
       sleep 2
@@ -115,7 +117,8 @@ for host in www.gutenberg.org gutendex.com archive.org; do
   last=$(awk '/BEGIN CERT/{c=""} {c=c $0 "\n"} /END CERT/{l=c} END{printf "%s", l}' "$OUT/chain-$host.txt")
   issuer_hash=$(printf "%b" "$last" | openssl x509 -noout -issuer_hash_old 2>/dev/null || true)
   echo "  top issuer: $(printf "%b" "$last" | openssl x509 -noout -issuer 2>/dev/null) (old hash $issuer_hash)"
-  if adb shell "ls /apex/com.android.conscrypt/cacerts/ /system/etc/security/cacerts/ 2>/dev/null" | grep -q "^$issuer_hash\.[0-9]"; then
+  adb shell "ls /apex/com.android.conscrypt/cacerts/ /system/etc/security/cacerts/ 2>/dev/null" > "$OUT/cacerts.txt" || true
+  if grep -q "^$issuer_hash\.[0-9]" "$OUT/cacerts.txt"; then
     echo "  the phone trusts it"
   else
     echo "  the phone does NOT have this root; the runner's copy:"
