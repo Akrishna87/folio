@@ -262,16 +262,19 @@ grep -q 'Search in this book' "$OUT/after-search.xml" && fail "tapping a search 
 echo "PASS: search in the book"
 
 # Press and hold a word to select it, then highlight it green.
-adb shell input swipe $((W / 2)) $((H / 2)) $((W / 2)) $((H / 2)) 1500
+dump before-select
+SPOT=$(python3 "$HERE/word_spot.py" "$OUT/before-select.xml" "$H" || echo "$((W / 2)) $((H / 2))")
+echo "  pressing and holding at $SPOT"
+adb shell input swipe $SPOT $SPOT 1500
 sleep 2
 dump selection
+shot 7d-longpress
 if grep -q 'content-desc="Highlight green"' "$OUT/selection.xml"; then
-  shot 7d-selection
   grep -q 'text="Look up"' "$OUT/selection.xml" || fail "the selection toolbar has no Look up"
   tap selection "Highlight green"
   sleep 2
   # Tapping the highlight opens its options.
-  adb shell input tap $((W / 2)) $((H / 2))
+  adb shell input tap $SPOT
   sleep 2
   dump highlight-sheet
   shot 7e-highlight

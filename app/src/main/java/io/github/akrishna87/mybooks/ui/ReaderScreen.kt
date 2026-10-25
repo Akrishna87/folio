@@ -435,6 +435,29 @@ internal class ReaderController(private val context: Context, private val vm: Bo
     }
 }
 
+/** Passes the WebView's text-selection callbacks through, but leaves the menu empty. */
+private class EmptyMenu(private val inner: android.view.ActionMode.Callback) : android.view.ActionMode.Callback2() {
+    override fun onCreateActionMode(mode: android.view.ActionMode, menu: android.view.Menu): Boolean {
+        inner.onCreateActionMode(mode, menu)
+        menu.clear()
+        return true
+    }
+
+    override fun onPrepareActionMode(mode: android.view.ActionMode, menu: android.view.Menu): Boolean {
+        inner.onPrepareActionMode(mode, menu)
+        menu.clear()
+        return true
+    }
+
+    override fun onActionItemClicked(mode: android.view.ActionMode, item: android.view.MenuItem) = inner.onActionItemClicked(mode, item)
+
+    override fun onDestroyActionMode(mode: android.view.ActionMode) = inner.onDestroyActionMode(mode)
+
+    override fun onGetContentRect(mode: android.view.ActionMode, view: View, outRect: android.graphics.Rect) {
+        if (inner is android.view.ActionMode.Callback2) inner.onGetContentRect(mode, view, outRect) else super.onGetContentRect(mode, view, outRect)
+    }
+}
+
 private tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.findActivity()
@@ -523,10 +546,12 @@ fun ReaderScreen(vm: BooksViewModel, bookId: String) {
                 },
                 factory = { ctx ->
                     // Selected text gets Folio's own toolbar (colours, note, copy, share, look up)
-                    // instead of the system's floating one.
+                    // instead of the system's menu. The system's action mode still starts (the
+                    // WebView drops the selection if it can't), just with nothing in it.
                     object : WebView(ctx) {
                         override fun startActionMode(callback: android.view.ActionMode.Callback?, type: Int): android.view.ActionMode? =
-                            if (type == android.view.ActionMode.TYPE_FLOATING) null else super.startActionMode(callback, type)
+                            if (callback != null && type == android.view.ActionMode.TYPE_FLOATING) super.startActionMode(EmptyMenu(callback), type)
+                            else super.startActionMode(callback, type)
                     }.apply {
                         setBackgroundColor(background.toArgb())
                         isVerticalScrollBarEnabled = false
