@@ -77,23 +77,23 @@ revive_if_killed() {
 }
 screen_size() { adb shell wm size | grep -o '[0-9]*x[0-9]*' | tail -1; }
 # Tap the middle of a reader page to show its menu (dumped as <name>). A link can sit under the
-# middle of the page and open in the browser instead; then come back, turn the page and try again.
+# middle of the page and open in the browser instead; then come back and tap the blank margin
+# under the text (the page's bottom padding), where no link can be.
 open_reader_menu() {
-  local i
+  local i y=$((H / 2))
   for i in 1 2 3 4; do
-    adb shell input tap $((W / 2)) $((H / 2))
+    adb shell input tap $((W / 2)) $y
     sleep 2
     dump "$1"
     grep -q 'of the book' "$OUT/$1.xml" && return 0
     # (Saved first: with pipefail, grep -q quitting early would fail the whole pipe.)
     adb shell dumpsys window > "$OUT/window.txt" 2>/dev/null || true
     if ! grep -qE "(mCurrentFocus|mFocusedApp).*$PKG" "$OUT/window.txt"; then
-      echo "  (the tap opened a link in the book; going back and turning the page)"
+      echo "  (the tap opened a link in the book; going back) $(grep -m1 -o 'mCurrentFocus=[^ ]* [^ ]* [^ }]*' "$OUT/window.txt" || true)"
       adb shell input keyevent KEYCODE_BACK
       sleep 2
     fi
-    adb shell input tap $((W * 9 / 10)) $((H / 2))
-    sleep 2
+    y=$((H - 70))
   done
   return 1
 }
