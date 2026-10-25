@@ -526,7 +526,8 @@ class BooksViewModel(app: Application) : AndroidViewModel(app) {
             side = prefs.getInt("reader_side", 24),
             justify = prefs.getBoolean("reader_justify", false),
             bold = prefs.getBoolean("reader_bold", false),
-            pageTurn = PageTurn.entries.getOrElse(prefs.getInt("reader_turn", 0)) { PageTurn.SLIDE },
+            // (A new key, so everyone starts with the page curl now that there is one.)
+            pageTurn = PageTurn.entries.getOrElse(prefs.getInt("reader_turn2", PageTurn.CURL.ordinal)) { PageTurn.CURL },
             autoNight = prefs.getBoolean("reader_auto_night", false),
         ),
     ); private set
@@ -541,7 +542,7 @@ class BooksViewModel(app: Application) : AndroidViewModel(app) {
             .putInt("reader_side", s.side)
             .putBoolean("reader_justify", s.justify)
             .putBoolean("reader_bold", s.bold)
-            .putInt("reader_turn", s.pageTurn.ordinal)
+            .putInt("reader_turn2", s.pageTurn.ordinal)
             .putBoolean("reader_auto_night", s.autoNight)
             .apply()
     }

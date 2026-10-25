@@ -21,7 +21,7 @@ enum class ReaderFont(val label: String, val css: String?) {
 }
 
 /** How pages change when you turn them. */
-enum class PageTurn(val label: String) { SLIDE("Slide"), FADE("Fade"), NONE("None") }
+enum class PageTurn(val label: String) { SLIDE("Slide"), FADE("Fade"), NONE("None"), CURL("Curl") }
 
 /** How the reader lays out a chapter. Sizes are CSS pixels (the same as dp on Android). */
 data class ReaderSettings(
@@ -36,7 +36,7 @@ data class ReaderSettings(
     val side: Int = 24,
     val justify: Boolean = false,
     val bold: Boolean = false,
-    val pageTurn: PageTurn = PageTurn.SLIDE,
+    val pageTurn: PageTurn = PageTurn.CURL,
     /** Switch to the Night theme when the phone is in dark mode. */
     val autoNight: Boolean = false,
 ) {

@@ -204,6 +204,12 @@ shot 4b-chapter-turn
 sleep 2
 for _ in $(seq 1 5); do adb shell input tap $((W * 9 / 10)) $((H / 2)); sleep 2; done
 shot 5-reader-turned
+# Drag a page slowly and catch it half-curled (the curl is the default page turn).
+adb shell input swipe $((W * 9 / 10)) $((H * 3 / 4)) $((W * 3 / 10)) $((H * 3 / 4)) 2500 &
+sleep 1.4
+shot 5b-page-curl
+wait
+sleep 2
 dump reader-turned
 PAGEINFO=$(grep -oE 'text="Page [0-9]+ of [0-9]+"' "$OUT/reader-turned.xml" | head -1 || true)
 echo "  after turning pages: $PAGEINFO"

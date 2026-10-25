@@ -80,6 +80,7 @@ import io.github.akrishna87.mybooks.epub.ZipEpubFiles
 import io.github.akrishna87.mybooks.epub.injectReader
 import io.github.akrishna87.mybooks.epub.readerCss
 import kotlinx.coroutines.Dispatchers
+import kotlin.math.abs
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -120,6 +121,10 @@ internal class ReaderController(private val context: Context, private val vm: Bo
     var webView: WebView? = null
     /** A picture of the last page, shown while the next chapter loads behind it (see [turnTo]). */
     var cover: android.widget.ImageView? = null
+    /** The curling page, for the Curl style (see [startCurl]). */
+    var curl: PageCurlView? = null
+    /** The page colour, for the back of a curling page. */
+    var paperColor = 0
     /** +1 or -1 while a chapter loads behind [cover]; 0 otherwise. */
     private var pendingTurn = 0
     private val revealTimeout = Runnable { reveal() }
@@ -224,6 +229,174 @@ internal class ReaderController(private val context: Context, private val vm: Bo
         bitmap
     } catch (e: Exception) {
         null
+    }
+
+    // ----- The Curl page turn -----
+    //
+    // Forward: a picture of this page goes over the reader, the reader moves on to the next page
+    // underneath, and the picture curls away to show it. Back: a picture of this page goes
+    // underneath, the reader moves back a page, and a picture of that page curls in over it.
+    // Let go early and the page settles back where it was.
+
+    private var curlDir = 0
+    private var curlReady = false
+    private var curlWaitsForPage = false
+    private var curlHidesOnPage = false
+    private var fingerX = 0f
+    private var endVelocity: Float? = null
+    private var autoTurn = false
+    private var curlAnim: android.animation.ValueAnimator? = null
+    private val curlTimeout = Runnable { hideCurl() }
+
+    private fun canTurn(dir: Int): Boolean {
+        val book = epub ?: return false
+        return if (dir > 0) page < pages - 1 || spineIndex < book.spine.lastIndex else page > 0 || spineIndex > 0
+    }
+
+    /** Moves the reader one page (into the next or previous chapter if need be), without animating. */
+    private fun step(dir: Int) {
+        if (dir > 0) {
+            if (page < pages - 1) webView?.evaluateJavascript("window.__reader && window.__reader.jump(1)", null) else load(spineIndex + 1)
+        } else {
+            if (page > 0) webView?.evaluateJavascript("window.__reader && window.__reader.jump(-1)", null) else load(spineIndex - 1, "end")
+        }
+    }
+
+    /** A finger started dragging sideways. Returns false if the page can't turn that way. */
+    fun startCurl(dir: Int, x: Float): Boolean {
+        val wv = webView ?: return false
+        val view = curl ?: return false
+        if (curlDir != 0 || pendingTurn != 0 || pages == 0 || !canTurn(dir)) return false
+        curlDir = dir
+        curlReady = false
+        fingerX = x
+        endVelocity = null
+        autoTurn = false
+        snapshot(wv) { picture ->
+            if (curlDir != dir) return@snapshot
+            if (picture == null) { // can't animate: just turn
+                curlDir = 0
+                step(dir)
+                return@snapshot
+            }
+            view.paper = paperColor
+            view.visibility = View.VISIBLE
+            if (dir > 0) {
+                view.under = null
+                view.front = picture
+                view.edge = view.flat
+                curlReady = true
+                step(1)
+                follow()
+            } else {
+                view.front = null
+                view.under = picture
+                curlWaitsForPage = true // the previous page is drawn once the reader shows it
+                step(-1)
+            }
+            main.postDelayed(curlTimeout, 8_000)
+        }
+        return true
+    }
+
+    /** Tapped the side of the page: turn with a curl, all by itself. */
+    fun curlTap(dir: Int) {
+        if (curlDir != 0) return
+        if (!canTurn(dir)) {
+            if (dir > 0 && epub != null) vm.reachedEnd(bookId)
+            return
+        }
+        val view = curl
+        if (view == null || view.width == 0 || !startCurl(dir, if (dir > 0) view.width.toFloat() else 0f)) {
+            step(dir)
+            return
+        }
+        autoTurn = true
+    }
+
+    fun dragCurl(x: Float) {
+        fingerX = x
+        if (curlReady) follow()
+    }
+
+    fun endCurl(velocity: Float, cancelled: Boolean) {
+        endVelocity = if (cancelled) 0f else velocity
+        if (curlReady) finishCurl()
+    }
+
+    private fun follow() {
+        val view = curl ?: return
+        if (autoTurn) return finishCurl()
+        view.edge = if (curlDir > 0) minOf(fingerX, view.flat) else fingerX
+        if (endVelocity != null) finishCurl()
+    }
+
+    private fun finishCurl() {
+        val view = curl ?: return
+        val v = if (autoTurn) curlDir * -2000f else endVelocity ?: return
+        val w = view.width.toFloat()
+        val turn = if (curlDir > 0) v < -300 || (v <= 300 && view.edge < w * 0.72f) else v > 300 || (v >= -300 && view.edge > w * 0.28f)
+        val target = if ((curlDir > 0) == turn) view.gone else view.flat
+        curlAnim?.cancel()
+        curlAnim = android.animation.ValueAnimator.ofFloat(view.edge, target).apply {
+            duration = (220 + 260 * abs(target - view.edge) / (2 * w)).toLong()
+            interpolator = android.view.animation.DecelerateInterpolator(1.4f)
+            addUpdateListener { view.edge = it.animatedValue as Float }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    if (turn) {
+                        hideCurl()
+                    } else {
+                        // Put the reader back on the page you were on, then uncover it.
+                        curlHidesOnPage = true
+                        step(-curlDir)
+                    }
+                }
+            })
+            start()
+        }
+    }
+
+    private fun hideCurl() {
+        main.removeCallbacks(curlTimeout)
+        curlAnim?.cancel()
+        curlAnim = null
+        curlDir = 0
+        curlReady = false
+        curlWaitsForPage = false
+        curlHidesOnPage = false
+        endVelocity = null
+        autoTurn = false
+        curl?.let {
+            it.visibility = View.GONE
+            it.front = null
+            it.under = null
+        }
+    }
+
+    /** The reader is showing a new page: carry on with a curl that was waiting for it. */
+    private fun curlOnPage() {
+        if (curlHidesOnPage) {
+            curlHidesOnPage = false
+            main.postDelayed({ hideCurl() }, 60) // once it has painted
+        }
+        if (!curlWaitsForPage) return
+        curlWaitsForPage = false
+        main.postDelayed({
+            val wv = webView ?: return@postDelayed hideCurl()
+            val view = curl ?: return@postDelayed hideCurl()
+            // The curl view covers the reader now, so draw the reader into a picture directly.
+            val picture = try {
+                android.graphics.Bitmap.createBitmap(wv.width, wv.height, android.graphics.Bitmap.Config.ARGB_8888).also { drawn(wv, it) }
+            } catch (e: Throwable) {
+                null
+            }
+            if (picture == null) return@postDelayed hideCurl()
+            view.front = picture
+            view.edge = view.gone
+            curlReady = true
+            follow()
+        }, 80)
     }
 
     /** The new chapter is laid out: move the old page out of the way. */
@@ -502,6 +675,7 @@ internal class ReaderController(private val context: Context, private val vm: Bo
                 if (pendingTurn != 0) reveal()
                 page = p
                 pages = n
+                curlOnPage()
                 pageStart = startOffset
                 pageBookmark = bookmarkId
                 pageSnippet = snippet
@@ -535,6 +709,12 @@ internal class ReaderController(private val context: Context, private val vm: Bo
         /** Nowhere to turn to: put the page back where it belongs. */
         private fun settle() {
             webView?.evaluateJavascript("window.__reader && window.__reader.settle()", null)
+        }
+
+        /** A tap or swipe asked to turn the page in the Curl style. */
+        @JavascriptInterface
+        fun curl(dir: Int) {
+            main.post { curlTap(dir) }
         }
 
         @JavascriptInterface
@@ -589,6 +769,7 @@ fun ReaderScreen(vm: BooksViewModel, bookId: String) {
     var noteFor by remember { mutableStateOf<String?>(null) } // the highlight whose note is being written
     controller.css = readerCss(style)
     controller.turnStyle = style.pageTurn.name.lowercase()
+    controller.paperColor = background.toArgb()
 
     LaunchedEffect(bookId) { controller.open() }
     // Reading time for the daily goal: counted in 15-second steps while pages are turning
@@ -653,10 +834,11 @@ fun ReaderScreen(vm: BooksViewModel, bookId: String) {
                     val wv = frame.getChildAt(0) as? WebView
                     if (controller.webView === wv) controller.webView = null
                     if (controller.cover === frame.getChildAt(1)) controller.cover = null
+                    if (controller.curl === frame.getChildAt(2)) controller.curl = null
                     wv?.destroy()
                 },
                 factory = { ctx ->
-                  android.widget.FrameLayout(ctx).apply {
+                  CurlFrame(ctx, controller).apply {
                     clipChildren = true
                     addView(
                     // Selected text gets Folio's own toolbar (colours, note, copy, share, look up)
@@ -719,6 +901,15 @@ fun ReaderScreen(vm: BooksViewModel, bookId: String) {
                             scaleType = android.widget.ImageView.ScaleType.FIT_XY
                             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                             controller.cover = this
+                        },
+                        android.widget.FrameLayout.LayoutParams(-1, -1),
+                    )
+                    // The page that curls over, for the Curl style.
+                    addView(
+                        PageCurlView(ctx).apply {
+                            visibility = View.GONE
+                            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                            controller.curl = this
                         },
                         android.widget.FrameLayout.LayoutParams(-1, -1),
                     )
@@ -1341,7 +1532,7 @@ private fun StylePanel(settings: ReaderSettings, onChange: (ReaderSettings) -> U
                 onChange(settings.copy(side = it))
             }
             SettingLabel("Page turn", text)
-            Choices(PageTurn.entries, settings.pageTurn, theme, { it.label }) { onChange(settings.copy(pageTurn = it)) }
+            Choices(listOf(PageTurn.CURL, PageTurn.SLIDE, PageTurn.FADE, PageTurn.NONE), settings.pageTurn, theme, { it.label }) { onChange(settings.copy(pageTurn = it)) }
             SwitchRow("Justify text", settings.justify, theme) { onChange(settings.copy(justify = it)) }
             SwitchRow("Bold text", settings.bold, theme) { onChange(settings.copy(bold = it)) }
         }

@@ -9,7 +9,8 @@
 //   Reader.bookmarks()        this chapter's bookmarks: [[offset, id], …]
 //   Reader.onSelection(bool)  whether some text is selected (for the Highlight button)
 //   Reader.onHighlightTap(id) a highlight was tapped (to recolour it, add a note or remove it)
-//   Reader.turnStyle()        how pages turn: "slide", "fade" or "none"
+//   Reader.turnStyle()        how pages turn: "curl", "slide", "fade" or "none"
+//   Reader.curl(dir)          turn with a page curl (the app draws it; dir 1 = forward, -1 = back)
 // Positions in the text ("offsets") count characters from the start of the chapter's text, so
 // they stay put whatever the text size.
 //   Reader.next() / prev()    flip past the end / start of this chapter
@@ -281,12 +282,14 @@
   // stays where the finger left it: the app covers it with a picture of itself and slides that
   // away, or calls settle() if there's nowhere to go.
   function next() {
+    if (turn === 'curl' && R && R.curl) { R.curl(1); return; }
     if (page < pages - 1) show(page + 1, true);
     else if (R) R.next();
     else settle();
   }
 
   function prev() {
+    if (turn === 'curl' && R && R.curl) { R.curl(-1); return; }
     if (page > 0) show(page - 1, true);
     else if (R) R.prev();
     else settle();
@@ -425,6 +428,8 @@
     setBookmarks: function (json) { bookmarks = parseList(json); if (ready) report(); },
     setTurn: function (style) { turn = style; },
     settle: settle,
+    // One page on or back at once, no animation (the app animates the curl over it).
+    jump: function (d) { show(page + d, false); },
     goTo: function (offset) { show(pageOfOffset(offset)); },
     goToFraction: function (f) { show(Math.round(Math.max(0, Math.min(1, f)) * (pages - 1))); },
     find: function (start, end) { flash(start, end); show(pageOfOffset(start)); }
