@@ -1,0 +1,29 @@
+# Temporary: what the candidate public-domain catalogs answer. Removed after one run.
+name: Probe sources
+on:
+  push:
+    branches: [claude/wonderful-einstein-h55pxx]
+    paths: [".github/workflows/probe-sources.yml"]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe
+        run: |
+          set +e
+          ua="Folio/1.0 (Android; +https://github.com/Akrishna87/folio)"
+          get() { echo; echo "===== $1"; curl -sSL -A "$ua" --max-time 40 -w '\n[status %{http_code}, %{content_type}, %{size_download} bytes]\n' "$1" | head -c "${2:-2500}"; echo; }
+          head1() { echo; echo "===== HEAD $1"; curl -sSIL -A "$ua" --max-time 40 "$1" | grep -iE '^(HTTP|content-type|content-length|location)' ; }
+          get "https://openlibrary.org/search.json?q=pride+and+prejudice&ebook_access=public&fields=key,title,author_name,ia,cover_i,ebook_access,first_publish_year&limit=3"
+          IA=$(curl -sSL -A "$ua" "https://openlibrary.org/search.json?q=pride+and+prejudice&ebook_access=public&fields=ia&limit=1" | python3 -c 'import sys,json; print(json.load(sys.stdin)["docs"][0]["ia"][0])')
+          echo "first ia: $IA"
+          curl -sSL -A "$ua" "https://archive.org/metadata/$IA" | python3 -c 'import sys,json; d=json.load(sys.stdin); print("rights/collection:", d["metadata"].get("collection"), d["metadata"].get("possible-copyright-status"), d["metadata"].get("rights")); [print(f["name"], f.get("format"), f.get("size")) for f in d["files"] if f["name"].endswith((".epub",".pdf",".txt"))]'
+          get "https://standardebooks.org/ebooks?query=pride+and+prejudice" 6000 | grep -oE 'href="/ebooks/[^"]+"|<title>[^<]*' | sort -u | head -20
+          get "https://standardebooks.org/feeds/opds" 1500
+          get "https://standardebooks.org/feeds/opds/all" 800
+          head1 "https://standardebooks.org/ebooks/jane-austen/pride-and-prejudice/downloads/jane-austen_pride-and-prejudice.epub?source=download"
+          get "https://standardebooks.org/ebooks/jane-austen/pride-and-prejudice" 200000 | grep -oE '(href|src)="[^"]*(cover|downloads)[^"]*"' | sort -u | head -20
+          get "https://en.wikisource.org/w/api.php?action=query&list=search&srsearch=Pride+and+Prejudice&srnamespace=0&format=json&srlimit=5" 1500
+          head1 "https://ws-export.wmcloud.org/?format=epub-3&lang=en&page=Pride_and_Prejudice"
+          get "https://catalog.feedbooks.com/search.atom?query=pride" 1500
+          get "https://gutendex.com/books/?search=pride%20prejudice" 600
