@@ -48,6 +48,7 @@ fun readerCss(s: ReaderSettings): String {
         body a, body a * { color: ${t.link} !important; text-decoration: none !important; }
         img, svg, video { max-width: 100% !important; max-height: calc(var(--page-h, 100vh) - ${textHeight}px) !important;
           width: auto !important; height: auto !important; object-fit: contain; break-inside: avoid; }
+        body mark.__hl { background-color: rgba(255, 196, 0, 0.42) !important; color: inherit !important; border-radius: 2px; }
         pre { white-space: pre-wrap !important; }
         table { max-width: 100% !important; }
         hr { border-style: solid !important; border-width: 1px 0 0 0 !important; }

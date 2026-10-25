@@ -3,6 +3,7 @@ package io.github.akrishna87.mybooks
 import android.content.Context
 import io.github.akrishna87.mybooks.catalog.Book
 import io.github.akrishna87.mybooks.catalog.Chapter
+import io.github.akrishna87.mybooks.epub.Marks
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -19,6 +20,8 @@ data class ShelfItem(
     val downloadIds: List<Long> = emptyList(),
     /** Every file is on the phone. */
     val downloaded: Boolean = false,
+    /** Names of the collections the book is in. */
+    val collections: List<String> = emptyList(),
 ) {
     val id: String get() = book.id
 
@@ -29,10 +32,12 @@ data class ShelfItem(
         .put("openedAt", openedAt)
         .put("downloadIds", JSONArray(downloadIds))
         .put("downloaded", downloaded)
+        .put("collections", JSONArray(collections))
 
     companion object {
         fun fromJson(o: JSONObject): ShelfItem {
             val ids = o.optJSONArray("downloadIds")
+            val cols = o.optJSONArray("collections")
             return ShelfItem(
                 book = Book.fromJson(o.getJSONObject("book")),
                 chapters = Chapter.listFromJson(o.optJSONArray("chapters")),
@@ -40,6 +45,7 @@ data class ShelfItem(
                 openedAt = o.optLong("openedAt"),
                 downloadIds = if (ids == null) emptyList() else List(ids.length()) { ids.getLong(it) },
                 downloaded = o.optBoolean("downloaded"),
+                collections = if (cols == null) emptyList() else List(cols.length()) { cols.getString(it) },
             )
         }
     }
@@ -99,6 +105,30 @@ object BookFiles {
     }
 
     fun sizeOf(context: Context, id: String): Long = dir(context, id).walkTopDown().filter { it.isFile }.sumOf { it.length() }
+}
+
+/** Each ebook's bookmarks and highlights, one small JSON file per book. */
+object MarksStore {
+    private fun file(context: Context, id: String) =
+        File(File(context.filesDir, "marks"), id.replace(Regex("[^A-Za-z0-9._-]"), "_") + ".json")
+
+    fun load(context: Context, id: String): Marks = try {
+        Marks.fromJson(JSONObject(file(context, id).readText()))
+    } catch (e: Exception) {
+        Marks()
+    }
+
+    fun save(context: Context, id: String, marks: Marks) {
+        val f = file(context, id)
+        f.parentFile?.mkdirs()
+        val tmp = File(f.path + ".tmp")
+        tmp.writeText(marks.toJson().toString())
+        tmp.renameTo(f)
+    }
+
+    fun delete(context: Context, id: String) {
+        file(context, id).delete()
+    }
 }
 
 /**

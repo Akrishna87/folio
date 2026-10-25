@@ -264,6 +264,7 @@ class BooksViewModel(app: Application) : AndroidViewModel(app) {
         AudioDownloads.cancel(context, item.downloadIds)
         BookFiles.delete(context, id)
         Progress.clear(context, id)
+        MarksStore.delete(context, id)
         downloads.remove(id)
         if (currentBookId == id) controller?.let { it.stop(); it.clearMediaItems() }
         saveShelf(shelf.filter { it.id != id })
@@ -271,6 +272,52 @@ class BooksViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun touch(id: String) = update(id) { it.copy(openedAt = System.currentTimeMillis()) }
+
+    // ----- Collections -----
+
+    /** Your collections' names, in the order you made them (kept even while empty). */
+    var collections by mutableStateOf(loadCollections()); private set
+
+    private fun loadCollections(): List<String> = try {
+        val arr = org.json.JSONArray(prefs.getString("collections", "[]"))
+        val saved = List(arr.length()) { arr.getString(it) }
+        // Collections named on books but missing from the list (shouldn't happen) still show.
+        (saved + shelf.flatMap { it.collections }).distinct()
+    } catch (e: Exception) {
+        emptyList()
+    }
+
+    private fun saveCollections(list: List<String>) {
+        collections = list
+        prefs.edit().putString("collections", org.json.JSONArray(list).toString()).apply()
+    }
+
+    /** Makes a collection, if there isn't one by that name already. Returns its name. */
+    fun createCollection(name: String): String? {
+        val clean = name.trim()
+        if (clean.isEmpty()) return null
+        collections.firstOrNull { it.equals(clean, ignoreCase = true) }?.let { return it }
+        saveCollections(collections + clean)
+        return clean
+    }
+
+    /** Puts [book] in [name], or takes it out if it's already there. */
+    fun toggleInCollection(book: Book, name: String) {
+        val inIt = shelfItem(book.id)?.collections?.contains(name) == true
+        if (inIt) {
+            update(book.id) { it.copy(collections = it.collections - name) }
+        } else {
+            val details = (audioDetails[book.id] as? Load.Ready<AudioDetails>)?.value
+            ensureOnShelf(ebookDetails[book.id] ?: book, details)
+            update(book.id) { it.copy(collections = it.collections + name) }
+        }
+    }
+
+    fun deleteCollection(name: String) {
+        saveCollections(collections - name)
+        saveShelf(shelf.map { if (name in it.collections) it.copy(collections = it.collections - name) else it })
+        say("Deleted the “$name” collection. Its books are still on your shelf.")
+    }
 
     /** How far through a book you are, 0..1. */
     fun progressOf(item: ShelfItem): Float {

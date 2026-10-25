@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs inside the Android emulator job against the real catalogs: installs the APK, searches
 # for a book, reads the ebook (checking pages turn), streams the audiobook (checking it keeps
-# playing in the background) and checks both end up on the shelf.
+# playing in the background) and checks both end up on the shelf, with a bookmark and a collection.
 # Usage: smoke-test.sh <apk> <output dir>
 set -euo pipefail
 
@@ -186,10 +186,44 @@ sleep 2
 shot 7-reader-sepia
 adb shell input keyevent KEYCODE_BACK # close the panel
 sleep 1
+dump reader-bm
+grep -q 'content-desc="Add bookmark"' "$OUT/reader-bm.xml" || { adb shell input tap $((W / 2)) $((H / 2)); sleep 2; dump reader-bm; }
+tap reader-bm "Add bookmark"
+sleep 2
+dump reader-bm2
+tap reader-bm2 "Contents"
+sleep 2
+dump toc
+tap toc "Bookmarks"
+sleep 2
+dump bookmarks
+shot 7b-bookmarks
+show bookmarks
+grep -q 'No bookmarks yet' "$OUT/bookmarks.xml" && fail "the bookmark didn't show in the Bookmarks list"
+grep -q 'content-desc="Remove bookmark"' "$OUT/bookmarks.xml" || fail "the Bookmarks list has no bookmark"
+echo "PASS: bookmarks"
+adb shell input keyevent KEYCODE_BACK # close the panel
+sleep 1
 adb shell input keyevent KEYCODE_BACK # close the book
 sleep 2
 wait_for ebook-again 'text="Continue reading"' 15 "the ebook page doesn't offer 'Continue reading' after reading"
 echo "PASS: reading progress is remembered"
+tap ebook-again "Collections"
+sleep 2
+dump collections
+tap collections "New collection"
+sleep 1
+adb shell input text "Favourites"
+sleep 1
+hide_keyboard
+dump collections-typed
+tap collections-typed "Add"
+sleep 1
+dump collections-added
+grep -q 'text="Favourites"' "$OUT/collections-added.xml" || fail "the new collection isn't in the Collections dialog"
+tap collections-added "Done"
+sleep 1
+echo "PASS: a book can go in a collection"
 
 echo "--- Playing the audiobook"
 adb shell input keyevent KEYCODE_BACK # back to the results
@@ -240,6 +274,12 @@ dump shelf
 shot 11-shelf
 [ "$(grep -o 'text="Pride and Prejudice"' "$OUT/shelf.xml" | wc -l)" -ge 2 ] || fail "the shelf doesn't list both books"
 echo "PASS: both books are on the shelf"
+grep -q 'text="Favourites"' "$OUT/shelf.xml" || fail "the shelf has no 'Favourites' collection"
+tap shelf "Favourites"
+sleep 2
+dump shelf-collection
+grep -q 'text="1 in “Favourites”"' "$OUT/shelf-collection.xml" || fail "the 'Favourites' collection doesn't hold the ebook"
+echo "PASS: collections show on the shelf"
 tap shelf "Home"
 sleep 2
 dump home-after

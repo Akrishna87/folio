@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.*
@@ -45,6 +46,8 @@ fun BookScreen(vm: BooksViewModel, found: Book) {
     val chapters: List<Chapter> = item?.chapters?.takeIf { it.isNotEmpty() } ?: (details as? Load.Ready<AudioDetails>)?.value?.chapters.orEmpty()
     val description = book.description.ifEmpty { (details as? Load.Ready<AudioDetails>)?.value?.description.orEmpty() }
     var confirm by remember { mutableStateOf<Confirm?>(null) }
+    var showCollections by remember { mutableStateOf(false) }
+    if (showCollections) CollectionsDialog(vm, book) { showCollections = false }
     val context = LocalContext.current
     val tint = placeholderColor(book.title)
 
@@ -67,6 +70,13 @@ fun BookScreen(vm: BooksViewModel, found: Book) {
                                 vm.say("No browser to open the page with")
                             }
                         }) { Icon(Icons.Rounded.Public, "Open the ${book.source.label} page") }
+                    }
+                    IconButton(onClick = { showCollections = true }) {
+                        Icon(
+                            Icons.Rounded.CollectionsBookmark,
+                            "Collections",
+                            tint = if (item?.collections?.isNotEmpty() == true) MaterialTheme.colorScheme.primary else Palette.Text,
+                        )
                     }
                     IconButton(onClick = { vm.toggleShelf(book) }) {
                         Icon(
@@ -282,6 +292,54 @@ private fun EbookActions(vm: BooksViewModel, book: Book, ask: (Confirm) -> Unit)
             modifier = Modifier.fillMaxWidth(),
         )
     }
+}
+
+/** Tick the collections a book belongs in, or make a new one. */
+@Composable
+private fun CollectionsDialog(vm: BooksViewModel, book: Book, onClose: () -> Unit) {
+    var newName by remember { mutableStateOf("") }
+    val inCollections = vm.shelfItem(book.id)?.collections.orEmpty()
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("Collections") },
+        text = {
+            Column {
+                if (vm.collections.isEmpty()) {
+                    Text("Group books your way, like “Holiday reads” or “Classics”. Make your first collection below.", color = Palette.SubText)
+                    Spacer(Modifier.height(8.dp))
+                }
+                vm.collections.forEach { name ->
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { vm.toggleInCollection(book, name) },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(checked = name in inCollections, onCheckedChange = { vm.toggleInCollection(book, name) })
+                        Text(name)
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = newName,
+                        onValueChange = { newName = it },
+                        placeholder = { Text("New collection") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(
+                        onClick = {
+                            vm.createCollection(newName)?.let { name ->
+                                if (name !in inCollections) vm.toggleInCollection(book, name)
+                            }
+                            newName = ""
+                        },
+                        enabled = newName.isNotBlank(),
+                    ) { Text("Add") }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onClose) { Text("Done") } },
+    )
 }
 
 @Composable

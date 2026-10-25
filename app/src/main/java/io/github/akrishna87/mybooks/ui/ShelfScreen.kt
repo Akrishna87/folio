@@ -1,6 +1,8 @@
 package io.github.akrishna87.mybooks.ui
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -32,13 +34,32 @@ fun ShelfScreen(vm: BooksViewModel) {
     LaunchedEffect(vm.shelf) {
         used = withContext(Dispatchers.IO) { vm.shelf.sumOf { BookFiles.sizeOf(context, it.id) } }
     }
+    // A collection picked from the chips, shown instead of the type filters.
+    var collection by remember { mutableStateOf<String?>(null) }
+    if (collection != null && collection !in vm.collections) collection = null
+    var confirmDelete by remember { mutableStateOf(false) }
     val list = vm.shelf.filter {
-        when (filter) {
-            ShelfFilter.ALL -> true
-            ShelfFilter.AUDIO -> it.book.kind == Kind.AUDIOBOOK
-            ShelfFilter.EBOOKS -> it.book.kind == Kind.EBOOK
-            ShelfFilter.DOWNLOADED -> it.downloaded
+        val c = collection
+        if (c != null) {
+            c in it.collections
+        } else {
+            when (filter) {
+                ShelfFilter.ALL -> true
+                ShelfFilter.AUDIO -> it.book.kind == Kind.AUDIOBOOK
+                ShelfFilter.EBOOKS -> it.book.kind == Kind.EBOOK
+                ShelfFilter.DOWNLOADED -> it.downloaded
+            }
         }
+    }
+    if (confirmDelete) {
+        val name = collection.orEmpty()
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete “$name”?") },
+            text = { Text("The collection goes, but its books stay on your shelf.") },
+            confirmButton = { TextButton(onClick = { confirmDelete = false; vm.deleteCollection(name); collection = null }) { Text("Delete") } },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Keep") } },
+        )
     }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = LocalBottomSpace.current)) {
@@ -50,9 +71,29 @@ fun ShelfScreen(vm: BooksViewModel) {
                     Text("Downloads use ${formatBytes(used)} on this phone", color = Palette.SubText, style = MaterialTheme.typography.bodySmall)
                 }
                 Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ShelfFilter.entries.forEach { f ->
-                        FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f.label) }, shape = CircleShape)
+                        FilterChip(
+                            selected = collection == null && filter == f,
+                            onClick = { filter = f; collection = null },
+                            label = { Text(f.label) },
+                            shape = CircleShape,
+                        )
+                    }
+                    vm.collections.forEach { name ->
+                        FilterChip(
+                            selected = collection == name,
+                            onClick = { collection = name },
+                            label = { Text(name) },
+                            leadingIcon = { Icon(Icons.Rounded.CollectionsBookmark, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                            shape = CircleShape,
+                        )
+                    }
+                }
+                collection?.let { name ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("${list.size} in “$name”", color = Palette.SubText, modifier = Modifier.weight(1f))
+                        TextButton(onClick = { confirmDelete = true }) { Text("Delete collection") }
                     }
                 }
                 Spacer(Modifier.height(8.dp))

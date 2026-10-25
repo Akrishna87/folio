@@ -54,9 +54,13 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import io.github.akrishna87.mybooks.BookFiles
 import io.github.akrishna87.mybooks.BooksViewModel
+import io.github.akrishna87.mybooks.MarksStore
 import io.github.akrishna87.mybooks.Progress
 import io.github.akrishna87.mybooks.catalog.encodePath
+import io.github.akrishna87.mybooks.epub.Bookmark
 import io.github.akrishna87.mybooks.epub.Epub
+import io.github.akrishna87.mybooks.epub.Highlight
+import io.github.akrishna87.mybooks.epub.Marks
 import io.github.akrishna87.mybooks.epub.ReaderFont
 import io.github.akrishna87.mybooks.epub.ReaderSettings
 import io.github.akrishna87.mybooks.epub.ReaderTheme
@@ -83,6 +87,13 @@ internal class ReaderController(private val context: Context, private val vm: Bo
     var page by mutableIntStateOf(0)
     var pages by mutableIntStateOf(0)
     var chrome by mutableStateOf(false)
+    /** Bookmarks and highlights in this book. */
+    var marks by mutableStateOf(Marks())
+    /** Where the text on the current page starts, its first words, and a bookmark on it ("" if none). */
+    var pageStart by mutableIntStateOf(0)
+    var pageSnippet by mutableStateOf("")
+    var pageBookmark by mutableStateOf("")
+    var hasSelection by mutableStateOf(false)
 
     var webView: WebView? = null
     private var files: ZipEpubFiles? = null
@@ -99,6 +110,7 @@ internal class ReaderController(private val context: Context, private val vm: Bo
                 files = zip
                 Epub.parse(zip)
             }
+            marks = withContext(Dispatchers.IO) { MarksStore.load(context, bookId) }
             epub = parsed
         } catch (e: Exception) {
             error = "This book couldn't be opened. Try removing it from your phone and downloading it again."
@@ -143,6 +155,55 @@ internal class ReaderController(private val context: Context, private val vm: Bo
         val index = book.spineIndexOf(url.path.orEmpty().trimStart('/'))
         if (index >= 0) spineIndex = index
         start = ""
+    }
+
+    private fun saveMarks(m: Marks) {
+        marks = m
+        MarksStore.save(context, bookId, m)
+        webView?.evaluateJavascript("window.__reader && window.__reader.setBookmarks(${JSONObject.quote(m.bookmarksJs(spineIndex))})", null)
+    }
+
+    private fun newId() = java.util.UUID.randomUUID().toString()
+
+    /** Bookmarks the current page, or removes the bookmark that's on it. */
+    fun toggleBookmark() {
+        val book = epub ?: return
+        if (pageBookmark.isNotEmpty()) {
+            saveMarks(marks.withoutBookmark(pageBookmark))
+            vm.say("Bookmark removed")
+        } else {
+            saveMarks(marks.withBookmark(Bookmark(newId(), spineIndex, pageStart, book.chapterTitle(spineIndex), pageSnippet, System.currentTimeMillis())))
+            vm.say("Bookmarked")
+        }
+    }
+
+    /** Highlights the selected text. */
+    fun highlightSelection() {
+        val wv = webView ?: return
+        val book = epub ?: return
+        wv.evaluateJavascript("window.__reader ? window.__reader.selection() : null") { json ->
+            val o = try { JSONObject(json) } catch (e: Exception) { null } ?: return@evaluateJavascript
+            val h = Highlight(newId(), spineIndex, o.optInt("start"), o.optInt("end"), o.optString("text"), book.chapterTitle(spineIndex), System.currentTimeMillis())
+            if (h.end <= h.start) return@evaluateJavascript
+            marks = marks.withHighlight(h)
+            MarksStore.save(context, bookId, marks)
+            wv.evaluateJavascript("window.__reader.mark(${h.start}, ${h.end}, ${JSONObject.quote(h.id)}); window.__reader.clearSelection()", null)
+            hasSelection = false
+        }
+    }
+
+    fun removeHighlight(id: String) {
+        marks = marks.withoutHighlight(id)
+        MarksStore.save(context, bookId, marks)
+        webView?.evaluateJavascript("window.__reader && window.__reader.unmark(${JSONObject.quote(id)})", null)
+    }
+
+    fun removeBookmark(id: String) = saveMarks(marks.withoutBookmark(id))
+
+    /** Opens the page holding character [offset] of chapter [spine]. */
+    fun goTo(spine: Int, offset: Int) {
+        if (spine == spineIndex) webView?.evaluateJavascript("window.__reader && window.__reader.goTo($offset)", null)
+        else load(spine, "c:$offset")
     }
 
     fun overall(): Float {
@@ -199,10 +260,24 @@ internal class ReaderController(private val context: Context, private val vm: Bo
         fun start(): String = start
 
         @JavascriptInterface
-        fun onPage(p: Int, n: Int) {
+        fun highlights(): String = marks.highlightsJs(spineIndex)
+
+        @JavascriptInterface
+        fun bookmarks(): String = marks.bookmarksJs(spineIndex)
+
+        @JavascriptInterface
+        fun onSelection(selected: Boolean) {
+            main.post { hasSelection = selected }
+        }
+
+        @JavascriptInterface
+        fun onPage(p: Int, n: Int, startOffset: Int, bookmarkId: String, snippet: String) {
             main.post {
                 page = p
                 pages = n
+                pageStart = startOffset
+                pageBookmark = bookmarkId
+                pageSnippet = snippet
                 val fraction = if (n > 1) p.toFloat() / (n - 1) else 0f
                 vm.saveReading(bookId, spineIndex, fraction, overall())
             }
@@ -383,6 +458,14 @@ fun ReaderScreen(vm: BooksViewModel, bookId: String) {
                             Text(chapter, color = textColor.copy(alpha = 0.6f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
+                    val bookmarked = controller.pageBookmark.isNotEmpty()
+                    IconButton(onClick = controller::toggleBookmark) {
+                        Icon(
+                            if (bookmarked) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder,
+                            if (bookmarked) "Remove bookmark" else "Add bookmark",
+                            tint = if (bookmarked) parseColor(theme.link) else textColor,
+                        )
+                    }
                     IconButton(onClick = { panel = "toc" }) { Icon(Icons.Rounded.FormatListNumbered, "Contents", tint = textColor) }
                     IconButton(onClick = { panel = "style" }) { Icon(Icons.Rounded.TextFields, "Text and colours", tint = textColor) }
                 }
@@ -414,6 +497,18 @@ fun ReaderScreen(vm: BooksViewModel, bookId: String) {
             }
         }
 
+        if (controller.hasSelection && epub != null) {
+            Button(
+                onClick = controller::highlightSelection,
+                modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 40.dp),
+                shape = CircleShape,
+            ) {
+                Icon(Icons.Rounded.BorderColor, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Highlight", fontWeight = FontWeight.Bold)
+            }
+        }
+
         when (panel) {
             "toc" -> epub?.let { TocPanel(it, controller, theme) { panel = null } }
             "style" -> StylePanel(style, vm::updateReaderSettings) { panel = null }
@@ -439,9 +534,24 @@ private fun TocPanel(epub: Epub, controller: ReaderController, theme: ReaderThem
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {} // taps on the panel stay on it
                 .navigationBarsPadding(),
         ) {
-            Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Contents", color = text, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+            var tab by remember { mutableStateOf("Contents") }
+            Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 8.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.weight(1f)) {
+                    listOf("Contents", "Bookmarks", "Highlights").forEach { t ->
+                        Text(
+                            t,
+                            color = if (t == tab) accent else text.copy(alpha = 0.7f),
+                            fontWeight = if (t == tab) FontWeight.Bold else FontWeight.Normal,
+                            fontSize = 16.sp,
+                            modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { tab = t }.padding(horizontal = 8.dp, vertical = 10.dp),
+                        )
+                    }
+                }
                 IconButton(onClick = onClose) { Icon(Icons.Rounded.Close, "Close", tint = text) }
+            }
+            if (tab != "Contents") {
+                MarksList(epub, controller, text, accent, bookmarks = tab == "Bookmarks", onClose = onClose)
+                return@Column
             }
             if (epub.toc.isEmpty()) {
                 Text("This book has no table of contents.", color = text.copy(alpha = 0.7f), modifier = Modifier.padding(20.dp))
@@ -463,6 +573,53 @@ private fun TocPanel(epub: Epub, controller: ReaderController, theme: ReaderThem
                             }
                             .padding(start = (20 + entry.depth * 16).dp, end = 20.dp, top = 12.dp, bottom = 12.dp),
                     )
+                }
+            }
+        }
+    }
+}
+
+/** The book's bookmarks or highlights: tap one to go there, or remove it. */
+@Composable
+private fun MarksList(epub: Epub, controller: ReaderController, text: Color, accent: Color, bookmarks: Boolean, onClose: () -> Unit) {
+    data class MarkRow(val id: String, val spine: Int, val offset: Int, val title: String, val body: String)
+    val rows = if (bookmarks) {
+        controller.marks.bookmarks.map { MarkRow(it.id, it.spine, it.offset, it.chapter, it.snippet) }
+    } else {
+        controller.marks.highlights.map { MarkRow(it.id, it.spine, it.start, it.chapter, it.text) }
+    }
+    if (rows.isEmpty()) {
+        Text(
+            if (bookmarks) "No bookmarks yet. Tap the bookmark at the top of a page to add one."
+            else "No highlights yet. Press and hold a word, drag to select the text, then tap Highlight.",
+            color = text.copy(alpha = 0.7f),
+            modifier = Modifier.padding(20.dp),
+        )
+        return
+    }
+    LazyColumn {
+        itemsIndexed(rows, key = { _, r -> r.id }) { _, r ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        controller.goTo(r.spine, r.offset)
+                        controller.chrome = false
+                        onClose()
+                    }
+                    .padding(start = 20.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (!bookmarks) {
+                    Box(Modifier.width(4.dp).height(40.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFFFFC400)))
+                    Spacer(Modifier.width(12.dp))
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(r.title.ifEmpty { epub.title.ifEmpty { "Part ${r.spine + 1}" } }, color = accent, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(r.body.ifEmpty { "Part ${r.spine + 1}" }, color = text, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                }
+                IconButton(onClick = { if (bookmarks) controller.removeBookmark(r.id) else controller.removeHighlight(r.id) }) {
+                    Icon(Icons.Rounded.DeleteOutline, if (bookmarks) "Remove bookmark" else "Remove highlight", tint = text.copy(alpha = 0.6f))
                 }
             }
         }
