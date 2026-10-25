@@ -335,6 +335,7 @@ echo "PASS: the audiobook streams"
 dump player
 shot 9-player
 grep -q 'LISTENING TO' "$OUT/player.xml" || fail "the full player didn't open"
+grep -q 'left in the book' "$OUT/player.xml" || fail "the player doesn't say how long is left in the book"
 tap player "1.0×"
 sleep 1
 dump speeds
@@ -372,11 +373,22 @@ sleep 2
 dump shelf-collection
 grep -q 'text="1 in “Favourites”"' "$OUT/shelf-collection.xml" || fail "the 'Favourites' collection doesn't hold the ebook"
 echo "PASS: collections show on the shelf"
+tap shelf-collection "Show as grid"
+sleep 2
+dump shelf-grid
+shot 11b-shelf-grid
+grep -q 'Pride and Prejudice' "$OUT/shelf-grid.xml" || fail "the shelf's grid view shows no books"
+grep -q 'content-desc="Show as list"' "$OUT/shelf-grid.xml" || fail "the shelf didn't switch to the grid view"
+tap shelf-grid "Show as list"
+sleep 1
+echo "PASS: shelf grid view"
 tap shelf "Home"
 sleep 2
 dump home-after
 shot 12-home-after
 grep -q 'text="Continue"' "$OUT/home-after.xml" || fail "Home doesn't show 'Continue'"
+grep -q 'text="Reading Goals"' "$OUT/home-after.xml" || fail "Home doesn't show the reading goals"
+echo "  goals: $(grep -oE 'text="[^"]*(min to go|Goal met|minutes today|streak|this year)[^"]*"' "$OUT/home-after.xml" | tr '\n' ' ')"
 echo "PASS: Home offers to continue"
 
 if adb logcat -d | grep -q "FATAL EXCEPTION"; then

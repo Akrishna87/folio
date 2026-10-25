@@ -114,6 +114,8 @@ internal class ReaderController(private val context: Context, private val vm: Bo
     var searchHits by mutableStateOf<List<SearchHit>>(emptyList())
     var searching by mutableStateOf(false)
     @Volatile var turnStyle = "slide"
+    /** When a page last turned; reading time only counts while pages keep turning. */
+    @Volatile var lastActivity = 0L
 
     var webView: WebView? = null
     private var files: ZipEpubFiles? = null
@@ -401,6 +403,7 @@ internal class ReaderController(private val context: Context, private val vm: Bo
 
         @JavascriptInterface
         fun onPage(p: Int, n: Int, startOffset: Int, bookmarkId: String, snippet: String) {
+            lastActivity = System.currentTimeMillis()
             main.post {
                 page = p
                 pages = n
@@ -416,7 +419,7 @@ internal class ReaderController(private val context: Context, private val vm: Bo
         fun next() {
             main.post {
                 val book = epub
-                if (book != null && spineIndex < book.spine.lastIndex) load(spineIndex + 1) else vm.say("That's the end of the book")
+                if (book != null && spineIndex < book.spine.lastIndex) load(spineIndex + 1) else vm.reachedEnd(bookId)
             }
         }
 
@@ -456,6 +459,14 @@ fun ReaderScreen(vm: BooksViewModel, bookId: String) {
     controller.turnStyle = style.pageTurn.name.lowercase()
 
     LaunchedEffect(bookId) { controller.open() }
+    // Reading time for the daily goal: counted in 15-second steps while pages are turning
+    // (a page turned in the last three minutes).
+    LaunchedEffect(controller) {
+        while (true) {
+            kotlinx.coroutines.delay(15_000)
+            if (System.currentTimeMillis() - controller.lastActivity < 180_000) vm.addReadingTime(15)
+        }
+    }
     DisposableEffect(controller) { onDispose { controller.close() } }
     BackHandler(enabled = panel != null) { panel = null }
     BackHandler(enabled = panel == null && controller.tappedHighlight != null) { controller.tappedHighlight = null }

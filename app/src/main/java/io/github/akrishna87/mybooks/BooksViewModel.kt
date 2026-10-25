@@ -274,6 +274,56 @@ class BooksViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun touch(id: String) = update(id) { it.copy(openedAt = System.currentTimeMillis()) }
 
+    // ----- Finished books and reading goals -----
+
+    /** Finished: marked so, or read or listened to the end. */
+    fun isFinished(item: ShelfItem) = item.finishedAt > 0 || progressOf(item) >= 0.995f
+
+    fun markFinished(id: String, finished: Boolean) {
+        update(id) { it.copy(finishedAt = if (finished) System.currentTimeMillis() else 0L) }
+        if (!finished && progressOf(shelfItem(id) ?: return) >= 0.995f) {
+            // "Still reading" after the last page: start it again from the beginning.
+            Progress.clear(context, id)
+            progressTick++
+        }
+        say(if (finished) "Marked as finished" else "Marked as not finished")
+    }
+
+    /** The last page of an ebook was turned. */
+    fun reachedEnd(id: String) {
+        if ((shelfItem(id)?.finishedAt ?: 0L) == 0L) {
+            update(id) { it.copy(finishedAt = System.currentTimeMillis()) }
+            say("You finished the book!")
+        } else {
+            say("That's the end of the book")
+        }
+    }
+
+    /** Books finished this calendar year. */
+    fun finishedThisYear(): Int {
+        val year = java.time.LocalDate.now().year
+        return shelf.count {
+            it.finishedAt > 0 && java.time.Instant.ofEpochMilli(it.finishedAt).atZone(java.time.ZoneId.systemDefault()).year == year
+        }
+    }
+
+    var stats by mutableStateOf(StatsStore.load(app)); private set
+
+    /** Picks up time the player added in the background. */
+    fun refreshStats() {
+        stats = StatsStore.load(context)
+    }
+
+    fun addReadingTime(seconds: Int) {
+        stats = StatsStore.add(context, seconds)
+    }
+
+    fun setDailyGoal(minutes: Int) {
+        stats = stats.copy(goalMinutes = minutes)
+        StatsStore.save(context, stats)
+        say("Daily goal: $minutes minutes")
+    }
+
     // ----- Collections -----
 
     /** Your collections' names, in the order you made them (kept even while empty). */
@@ -653,8 +703,31 @@ class BooksViewModel(app: Application) : AndroidViewModel(app) {
         if (c.isPlaying) c.pause() else resume(c)
     }
 
-    fun seekBack() = controller?.seekBack()
-    fun seekForward() = controller?.seekForward()
+    /** How far the player's skip buttons jump, in seconds. */
+    var skipBackSec by mutableIntStateOf(prefs.getInt("skip_back", 15)); private set
+    var skipForwardSec by mutableIntStateOf(prefs.getInt("skip_forward", 30)); private set
+
+    fun setSkips(back: Int, forward: Int) {
+        skipBackSec = back
+        skipForwardSec = forward
+        prefs.edit().putInt("skip_back", back).putInt("skip_forward", forward).apply()
+    }
+
+    fun seekBack() = controller?.let { it.seekTo((it.currentPosition - skipBackSec * 1000L).coerceAtLeast(0)) }
+    fun seekForward() = controller?.let {
+        val to = it.currentPosition + skipForwardSec * 1000L
+        if (it.duration > 0 && to >= it.duration && it.hasNextMediaItem()) it.seekToNextMediaItem() else it.seekTo(to)
+    }
+
+    /** Listening time left in the whole audiobook, at normal speed (0 if unknown). */
+    fun bookTimeLeftMs(): Long {
+        val item = currentItem ?: return 0
+        val chapters = item.chapters
+        if (chapters.isEmpty() || chapterIndex !in chapters.indices) return 0
+        val total = chapters.sumOf { it.durationSec } * 1000
+        val done = chapters.take(chapterIndex).sumOf { it.durationSec } * 1000 + positionMs
+        return (total - done).toLong().coerceAtLeast(0)
+    }
     fun seekTo(ms: Long) = controller?.seekTo(ms)
     fun nextChapter() = controller?.let { if (it.hasNextMediaItem()) it.seekToNextMediaItem() }
     fun previousChapter() = controller?.let {

@@ -91,8 +91,14 @@ class PlaybackService : MediaSessionService() {
 
         scope.launch {
             var tick = 0
+            var listened = 0
             while (isActive) {
                 delay(1_000)
+                // Listening counts towards the daily reading goal.
+                if (player.isPlaying && ++listened >= 15) {
+                    StatsStore.add(this@PlaybackService, listened)
+                    listened = 0
+                }
                 val until = SleepTimer.until(this@PlaybackService)
                 if (until > 0 && System.currentTimeMillis() >= until) {
                     SleepTimer.clear(this@PlaybackService)

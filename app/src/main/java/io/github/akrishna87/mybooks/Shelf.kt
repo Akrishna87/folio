@@ -4,6 +4,7 @@ import android.content.Context
 import io.github.akrishna87.mybooks.catalog.Book
 import io.github.akrishna87.mybooks.catalog.Chapter
 import io.github.akrishna87.mybooks.epub.Marks
+import io.github.akrishna87.mybooks.stats.ReadingStats
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -22,6 +23,8 @@ data class ShelfItem(
     val downloaded: Boolean = false,
     /** Names of the collections the book is in. */
     val collections: List<String> = emptyList(),
+    /** When you marked it finished (or reached its end); 0 if not finished. */
+    val finishedAt: Long = 0L,
 ) {
     val id: String get() = book.id
 
@@ -33,6 +36,7 @@ data class ShelfItem(
         .put("downloadIds", JSONArray(downloadIds))
         .put("downloaded", downloaded)
         .put("collections", JSONArray(collections))
+        .put("finishedAt", finishedAt)
 
     companion object {
         fun fromJson(o: JSONObject): ShelfItem {
@@ -46,6 +50,7 @@ data class ShelfItem(
                 downloadIds = if (ids == null) emptyList() else List(ids.length()) { ids.getLong(it) },
                 downloaded = o.optBoolean("downloaded"),
                 collections = if (cols == null) emptyList() else List(cols.length()) { cols.getString(it) },
+                finishedAt = o.optLong("finishedAt"),
             )
         }
     }
@@ -164,5 +169,30 @@ object Progress {
 
     fun clear(context: Context, id: String) {
         prefs(context).edit().remove("pos:$id").remove("pct:$id").apply()
+    }
+}
+
+/** Reading and listening time per day, and the daily goal. Written by the reader and the player. */
+object StatsStore {
+    private fun prefs(context: Context) = context.getSharedPreferences("stats", Context.MODE_PRIVATE)
+
+    @Synchronized
+    fun load(context: Context): ReadingStats = try {
+        ReadingStats.fromJson(JSONObject(prefs(context).getString("stats", "{}") ?: "{}"))
+    } catch (e: Exception) {
+        ReadingStats()
+    }
+
+    @Synchronized
+    fun save(context: Context, stats: ReadingStats) {
+        prefs(context).edit().putString("stats", stats.toJson().toString()).apply()
+    }
+
+    /** Adds [seconds] of reading or listening to today. */
+    @Synchronized
+    fun add(context: Context, seconds: Int): ReadingStats {
+        val stats = load(context).add(java.time.LocalDate.now(), seconds)
+        save(context, stats)
+        return stats
     }
 }
