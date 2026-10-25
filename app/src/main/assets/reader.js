@@ -5,9 +5,11 @@
 //   Reader.onPage(page, n, startOffset, bookmarkId, snippet)
 //                             the page now showing, where its text starts, a bookmark on it (or
 //                             ""), and the first words on it
-//   Reader.highlights()       this chapter's highlights: [[start, end, id], …]
+//   Reader.highlights()       this chapter's highlights: [[start, end, id, colour, hasNote], …]
 //   Reader.bookmarks()        this chapter's bookmarks: [[offset, id], …]
 //   Reader.onSelection(bool)  whether some text is selected (for the Highlight button)
+//   Reader.onHighlightTap(id) a highlight was tapped (to recolour it, add a note or remove it)
+//   Reader.turnStyle()        how pages turn: "slide", "fade" or "none"
 // Positions in the text ("offsets") count characters from the start of the chapter's text, so
 // they stay put whatever the text size.
 //   Reader.next() / prev()    flip past the end / start of this chapter
@@ -47,10 +49,47 @@
     b.style.transform = t;
   }
 
-  function show(p) {
-    page = Math.max(0, Math.min(pages - 1, p));
+  // ----- Turning pages -----
+
+  var turn = 'slide';
+  var SLIDE_MS = 280, FADE_MS = 140;
+  var fadeTimer = 0;
+
+  function place(x, animate) {
     var b = body();
-    if (b) b.style.transform = 'translateX(' + (-page * width) + 'px)';
+    if (!b) return;
+    b.style.transition = animate ? 'transform ' + SLIDE_MS + 'ms cubic-bezier(0.2, 0.7, 0.3, 1)' : 'none';
+    b.style.transform = 'translateX(' + x + 'px)';
+  }
+
+  // Where the body sits right now, even halfway through a slide.
+  function curX() {
+    var b = body();
+    if (!b) return 0;
+    var t = getComputedStyle(b).transform;
+    if (!t || t === 'none') return 0;
+    var m = t.match(/matrix\(([^)]+)\)/);
+    return m ? parseFloat(m[1].split(',')[4]) || 0 : 0;
+  }
+
+  // animate: true when the reader turned the page (a tap or swipe), not when the app moved it.
+  function show(p, animate) {
+    var from = page;
+    page = Math.max(0, Math.min(pages - 1, p));
+    var x = -page * width;
+    if (animate && turn === 'fade' && from !== page) {
+      var b = body();
+      clearTimeout(fadeTimer);
+      b.style.transition = 'opacity ' + FADE_MS + 'ms ease';
+      b.style.opacity = '0';
+      fadeTimer = setTimeout(function () {
+        place(x, false);
+        b.style.transition = 'opacity ' + FADE_MS + 'ms ease';
+        b.style.opacity = '1';
+      }, FADE_MS);
+    } else {
+      place(x, animate && turn === 'slide');
+    }
     report();
   }
 
@@ -103,20 +142,21 @@
     var rects = r.getClientRects();
     var rect = rects.length ? rects[0] : (loc.node.parentElement && loc.node.parentElement.getBoundingClientRect());
     if (!rect) return 0;
-    return Math.max(0, Math.min(pages - 1, Math.floor((rect.left + page * width) / width)));
+    return Math.max(0, Math.min(pages - 1, Math.floor((rect.left - curX()) / width)));
   }
 
+  // Where a character sits from the left edge of the current page, wherever the body is sliding.
   function charLeft(node, i) {
     var r = document.createRange();
     r.setStart(node, i);
     r.setEnd(node, i + 1);
     var rects = r.getClientRects();
-    return rects.length ? rects[0].left : -Infinity;
+    return rects.length ? rects[0].left - curX() - page * width : -Infinity;
   }
 
   // Where the text on the current page starts, or -1 if the page has no text.
   function firstOffsetOnPage() {
-    var nodes = textNodes(), pos = 0;
+    var nodes = textNodes(), pos = 0, shift = curX() + page * width;
     for (var i = 0; i < nodes.length; i++) {
       var node = nodes[i], len = node.data.length;
       if (node.data.trim()) {
@@ -124,9 +164,10 @@
         r.selectNodeContents(node);
         var rects = r.getClientRects(), visible = false, startsHere = false;
         for (var k = 0; k < rects.length; k++) {
-          if (rects[k].width > 0 && rects[k].left < width && rects[k].right > 0) {
+          var left = rects[k].left - shift, right = rects[k].right - shift;
+          if (rects[k].width > 0 && left < width && right > 0) {
             visible = true;
-            if (k === 0 && rects[k].left >= 0) startsHere = true;
+            if (k === 0 && left >= 0) startsHere = true;
             break;
           }
         }
@@ -156,7 +197,8 @@
   var bookmarks = [];
   var XHTML = 'http://www.w3.org/1999/xhtml';
 
-  function mark(start, end, id) {
+  function mark(start, end, id, color, hasNote) {
+    var cls = '__hl c-' + (color || 'yellow') + (hasNote ? ' __note' : '');
     var nodes = textNodes(), pos = 0;
     for (var i = 0; i < nodes.length; i++) {
       var node = nodes[i], len = node.data.length;
@@ -166,7 +208,7 @@
         if (b - pos < len) target.splitText(b - pos);
         if (a - pos > 0) target = target.splitText(a - pos);
         var m = document.createElementNS(XHTML, 'mark');
-        m.setAttribute('class', '__hl');
+        m.setAttribute('class', cls);
         m.setAttribute('data-id', id);
         target.parentNode.insertBefore(m, target);
         m.appendChild(target);
@@ -175,8 +217,23 @@
     }
   }
 
-  function unmark(id) {
+  function recolor(id, color, hasNote) {
     var marks = document.querySelectorAll('mark.__hl');
+    for (var i = 0; i < marks.length; i++) {
+      if (marks[i].getAttribute('data-id') === id) marks[i].setAttribute('class', '__hl c-' + color + (hasNote ? ' __note' : ''));
+    }
+  }
+
+  // Briefly shows where a search result is.
+  function flash(start, end) {
+    mark(start, end, '__find', '', false);
+    var found = document.querySelectorAll('mark[data-id="__find"]');
+    for (var i = 0; i < found.length; i++) found[i].setAttribute('class', '__find');
+    setTimeout(function () { unmark('__find'); }, 2500);
+  }
+
+  function unmark(id) {
+    var marks = document.querySelectorAll('mark[data-id]');
     for (var i = 0; i < marks.length; i++) {
       var m = marks[i];
       if (m.getAttribute('data-id') !== id) continue;
@@ -214,20 +271,20 @@
 
   function pageOf(el) {
     if (!el) return 0;
-    var left = el.getBoundingClientRect().left + page * width;
+    var left = el.getBoundingClientRect().left - curX();
     return Math.floor(Math.max(0, left) / width);
   }
 
   function fraction() { return pages > 1 ? page / (pages - 1) : 0; }
 
   function next() {
-    if (page < pages - 1) show(page + 1);
-    else if (R) R.next();
+    if (page < pages - 1) show(page + 1, true);
+    else { place(-page * width, turn === 'slide'); if (R) R.next(); }
   }
 
   function prev() {
-    if (page > 0) show(page - 1);
-    else if (R) R.prev();
+    if (page > 0) show(page - 1, true);
+    else { place(-page * width, turn === 'slide'); if (R) R.prev(); }
   }
 
   function relayout() {
@@ -248,7 +305,8 @@
       return;
     }
     ready = true;
-    if (R && R.highlights) parseList(R.highlights()).forEach(function (h) { mark(h[0], h[1], h[2]); });
+    if (R && R.highlights) parseList(R.highlights()).forEach(function (h) { mark(h[0], h[1], h[2], h[3], h[4]); });
+    if (R && R.turnStyle) turn = String(R.turnStyle());
     if (R && R.bookmarks) bookmarks = parseList(R.bookmarks());
     measure();
     var start = R ? String(R.start()) : '';
@@ -257,6 +315,11 @@
     } else if (start.indexOf('c:') === 0) {
       show(0);
       show(pageOfOffset(parseInt(start.slice(2), 10) || 0));
+    } else if (start.indexOf('s:') === 0) { // a search result: s:<start>-<end>
+      var se = start.slice(2).split('-');
+      show(0);
+      flash(parseInt(se[0], 10) || 0, parseInt(se[1], 10) || 0);
+      show(pageOfOffset(parseInt(se[0], 10) || 0));
     } else if (start.indexOf('f:') === 0) {
       show(Math.round(parseFloat(start.slice(2)) * (pages - 1)));
     } else if (location.hash) {
@@ -268,18 +331,38 @@
     document.documentElement.className += ' __ready';
   }
 
-  // Swipe sideways to turn the page.
-  var sx = 0, sy = 0;
+  // Swipe sideways to turn the page. With the slide style the page follows your finger.
+  var sx = 0, sy = 0, st = 0, dragging = false, decided = false;
   document.addEventListener('touchstart', function (e) {
     var t = e.touches[0];
-    sx = t.clientX; sy = t.clientY;
+    sx = t.clientX; sy = t.clientY; st = Date.now();
+    dragging = false; decided = false;
+  }, { passive: true });
+  document.addEventListener('touchmove', function (e) {
+    if (!ready || e.touches.length !== 1 || hasSelection()) return;
+    var t = e.touches[0];
+    var dx = t.clientX - sx, dy = t.clientY - sy;
+    if (!decided && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) {
+      decided = true;
+      dragging = Math.abs(dx) > Math.abs(dy) * 1.3;
+    }
+    if (dragging && turn === 'slide') {
+      // Past the first or last page the page gives a little, like pulling on a bound book.
+      var edge = (dx > 0 && page === 0) || (dx < 0 && page === pages - 1);
+      place(-page * width + (edge ? dx * 0.35 : dx), false);
+    }
   }, { passive: true });
   document.addEventListener('touchend', function (e) {
     var t = e.changedTouches[0];
     var dx = t.clientX - sx, dy = t.clientY - sy;
+    var wasDragging = dragging;
+    dragging = false;
     if (hasSelection()) return; // dragging the selection handles, not turning the page
-    if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.3) {
+    var fast = Math.abs(dx) > 30 && Date.now() - st < 300;
+    if ((wasDragging || Math.abs(dx) > 40) && Math.abs(dx) > Math.abs(dy) * 1.3 && (fast || Math.abs(dx) > width * 0.18)) {
       if (dx < 0) next(); else prev();
+    } else if (wasDragging && turn === 'slide') {
+      place(-page * width, true); // not far enough: settle back
     }
   }, { passive: true });
 
@@ -296,6 +379,8 @@
     }
     var sel = window.getSelection && window.getSelection();
     if (sel && String(sel).length > 0) return;
+    var hl = e.target.closest ? e.target.closest('mark.__hl') : null;
+    if (hl && R && R.onHighlightTap) { R.onHighlightTap(hl.getAttribute('data-id')); return; }
     var x = e.clientX / width;
     if (x < 0.3) prev();
     else if (x > 0.7) next();
@@ -327,9 +412,13 @@
     pages: function () { return pages; },
     selection: function () { return selectionInfo(); },
     clearSelection: function () { var sel = window.getSelection(); if (sel) sel.removeAllRanges(); },
-    mark: function (start, end, id) { mark(start, end, id); report(); },
+    mark: function (start, end, id, color, hasNote) { mark(start, end, id, color, hasNote); report(); },
+    recolor: function (id, color, hasNote) { recolor(id, color, hasNote); },
     unmark: function (id) { unmark(id); },
     setBookmarks: function (json) { bookmarks = parseList(json); if (ready) report(); },
-    goTo: function (offset) { show(pageOfOffset(offset)); }
+    setTurn: function (style) { turn = style; },
+    goTo: function (offset) { show(pageOfOffset(offset)); },
+    goToFraction: function (f) { show(Math.round(Math.max(0, Math.min(1, f)) * (pages - 1))); },
+    find: function (start, end) { flash(start, end); show(pageOfOffset(start)); }
   };
 })();

@@ -22,6 +22,7 @@ import io.github.akrishna87.mybooks.catalog.Book
 import io.github.akrishna87.mybooks.catalog.Kind
 import io.github.akrishna87.mybooks.catalog.Query
 import io.github.akrishna87.mybooks.catalog.formatBytes
+import io.github.akrishna87.mybooks.epub.PageTurn
 import io.github.akrishna87.mybooks.epub.ReaderFont
 import io.github.akrishna87.mybooks.epub.ReaderSettings
 import io.github.akrishna87.mybooks.epub.ReaderTheme
@@ -471,6 +472,12 @@ class BooksViewModel(app: Application) : AndroidViewModel(app) {
             theme = ReaderTheme.entries.getOrElse(prefs.getInt("reader_theme", 0)) { ReaderTheme.LIGHT },
             font = ReaderFont.entries.getOrElse(prefs.getInt("reader_font", 0)) { ReaderFont.SERIF },
             textZoom = prefs.getInt("reader_zoom", 110),
+            lineHeight = prefs.getFloat("reader_line_height", 1.55f),
+            side = prefs.getInt("reader_side", 24),
+            justify = prefs.getBoolean("reader_justify", false),
+            bold = prefs.getBoolean("reader_bold", false),
+            pageTurn = PageTurn.entries.getOrElse(prefs.getInt("reader_turn", 0)) { PageTurn.SLIDE },
+            autoNight = prefs.getBoolean("reader_auto_night", false),
         ),
     ); private set
 
@@ -480,6 +487,12 @@ class BooksViewModel(app: Application) : AndroidViewModel(app) {
             .putInt("reader_theme", s.theme.ordinal)
             .putInt("reader_font", s.font.ordinal)
             .putInt("reader_zoom", s.textZoom)
+            .putFloat("reader_line_height", s.lineHeight)
+            .putInt("reader_side", s.side)
+            .putBoolean("reader_justify", s.justify)
+            .putBoolean("reader_bold", s.bold)
+            .putInt("reader_turn", s.pageTurn.ordinal)
+            .putBoolean("reader_auto_night", s.autoNight)
             .apply()
     }
 

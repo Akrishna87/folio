@@ -2,6 +2,7 @@ package io.github.akrishna87.mybooks
 
 import io.github.akrishna87.mybooks.epub.Bookmark
 import io.github.akrishna87.mybooks.epub.Highlight
+import io.github.akrishna87.mybooks.epub.HighlightColor
 import io.github.akrishna87.mybooks.epub.Marks
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -25,8 +26,19 @@ class MarksTest {
     @Test
     fun chapterListsForTheReader() {
         val m = Marks().withBookmark(b1).withBookmark(b2).withHighlight(h1)
-        assertEquals("[[0,12,\"h1\"]]", m.highlightsJs(1))
+        assertEquals("[[0,12,\"h1\",\"yellow\",0]]", m.highlightsJs(1))
         assertEquals("[]", m.highlightsJs(3))
         assertEquals("[[900,\"b1\"]]", m.bookmarksJs(3))
+    }
+
+    @Test
+    fun highlightColourAndNoteCanChange() {
+        val m = Marks().withHighlight(h1).withHighlight(h1.copy(color = HighlightColor.BLUE, note = "Famous first line"))
+        assertEquals(1, m.highlights.size)
+        assertEquals(HighlightColor.BLUE, m.highlights[0].color)
+        assertEquals(m, Marks.fromJson(JSONObject(m.toJson().toString())))
+        // Highlights saved before colours existed come back yellow.
+        val old = JSONObject("{\"id\":\"x\",\"spine\":0,\"start\":1,\"end\":2}")
+        assertEquals(HighlightColor.YELLOW, Highlight.fromJson(old).color)
     }
 }

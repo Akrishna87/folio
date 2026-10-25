@@ -242,6 +242,60 @@ grep -q 'content-desc="Remove bookmark"' "$OUT/bookmarks.xml" || fail "the Bookm
 echo "PASS: bookmarks"
 adb shell input keyevent KEYCODE_BACK # close the panel
 sleep 1
+
+# Search in the book, and open a result.
+dump reader-s
+grep -q 'content-desc="Search in book"' "$OUT/reader-s.xml" || open_reader_menu reader-s || true
+tap reader-s "Search in book"
+sleep 2
+adb shell input text "Bennet"
+adb shell input keyevent KEYCODE_ENTER
+sleep 1
+hide_keyboard
+wait_for search-results 'text="[0-9]+\+? match(es)?"' 60 "searching the book found nothing for 'Bennet'"
+shot 7c-search
+echo "  $(grep -oE 'text="[0-9]+\+? match(es)?"' "$OUT/search-results.xml" | head -1)"
+tap search-results "Bennet " # a result (the search box says just "Bennet")
+sleep 3
+dump after-search
+grep -q 'Search in this book' "$OUT/after-search.xml" && fail "tapping a search result didn't go to it"
+echo "PASS: search in the book"
+
+# Press and hold a word to select it, then highlight it green.
+adb shell input swipe $((W / 2)) $((H / 2)) $((W / 2)) $((H / 2)) 1500
+sleep 2
+dump selection
+if grep -q 'content-desc="Highlight green"' "$OUT/selection.xml"; then
+  shot 7d-selection
+  grep -q 'text="Look up"' "$OUT/selection.xml" || fail "the selection toolbar has no Look up"
+  tap selection "Highlight green"
+  sleep 2
+  # Tapping the highlight opens its options.
+  adb shell input tap $((W / 2)) $((H / 2))
+  sleep 2
+  dump highlight-sheet
+  shot 7e-highlight
+  grep -q 'text="Add note"' "$OUT/highlight-sheet.xml" || fail "tapping the highlight didn't open its options"
+  adb shell input keyevent KEYCODE_BACK # close the options
+  sleep 1
+  # The highlight is listed under Highlights.
+  adb shell input tap $((W / 2)) $((H - 70))
+  sleep 2
+  dump reader-hl
+  tap reader-hl "Contents"
+  sleep 2
+  dump toc-hl
+  tap toc-hl "Highlights"
+  sleep 2
+  dump highlights
+  grep -q 'No highlights yet' "$OUT/highlights.xml" && fail "the highlight isn't in the Highlights list"
+  echo "PASS: highlights in colour"
+  adb shell input keyevent KEYCODE_BACK # close the panel
+  sleep 1
+else
+  echo "WARNING: pressing and holding didn't select any text here; skipping the highlight check"
+  show selection
+fi
 adb shell input keyevent KEYCODE_BACK # close the book
 sleep 2
 wait_for ebook-again 'text="Continue reading"' 15 "the ebook page doesn't offer 'Continue reading' after reading"
