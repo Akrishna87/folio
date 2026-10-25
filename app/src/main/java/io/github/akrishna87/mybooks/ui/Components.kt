@@ -127,9 +127,8 @@ fun BookRow(
             Spacer(Modifier.height(4.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 KindLabel(book.kind)
-                if (note != null) {
-                    Text("  ·  $note", color = Palette.SubText, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
+                // Where it's from (the shelf shows progress here instead).
+                Text("  ·  ${note ?: book.source.label}", color = Palette.SubText, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             if (progress != null && progress > 0f) {
                 Spacer(Modifier.height(6.dp))
