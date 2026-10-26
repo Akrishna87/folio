@@ -9,10 +9,11 @@ enum class Kind(val label: String) { AUDIOBOOK("Audiobook"), EBOOK("Ebook") }
 enum class Source(val label: String, val licence: String) {
     LIBRIVOX("LibriVox", "Public domain recording, free to download and share"),
     GUTENBERG("Project Gutenberg", "Public domain in the USA, free to download"),
+    STANDARD_EBOOKS("Standard Ebooks", "Public domain in the USA, proofread and free to download (CC0)"),
 }
 
 data class Book(
-    /** "librivox:<Internet Archive identifier>" or "gutenberg:<ebook number>". */
+    /** "librivox:<Internet Archive identifier>", "gutenberg:<ebook number>" or "standardebooks:<author/title>". */
     val id: String,
     val kind: Kind,
     val source: Source,

@@ -110,7 +110,7 @@ SIZE=$(screen_size); W=${SIZE%x*}; H=${SIZE#*x}
 
 # For the log: which certificate authority each catalog's HTTPS chain ends at, and whether this
 # phone's trust store has it (when it doesn't, Android refuses with "Trust anchor ... not found").
-for host in www.gutenberg.org gutendex.com archive.org; do
+for host in www.gutenberg.org gutendex.com standardebooks.org archive.org; do
   echo "--- Certificate chain of $host"
   echo | openssl s_client -connect "$host:443" -servername "$host" -showcerts 2>/dev/null > "$OUT/chain-$host.txt" || true
   grep -E '^ *[0-9]+ s:|^ *i:' "$OUT/chain-$host.txt" || true
@@ -167,6 +167,9 @@ wait_for ebooks 'text="Ebook"' 60 "no ebook results"
 show ebooks
 echo "PASS: search finds ebooks"
 grep -q 'text="Pride and Prejudice"' "$OUT/ebooks.xml" || fail "the ebook results have no Pride and Prejudice"
+grep -q 'Standard Ebooks' "$OUT/ebooks.xml" || fail "the ebook results have nothing from Standard Ebooks"
+grep -q 'Project Gutenberg' "$OUT/ebooks.xml" || echo "WARNING: no Project Gutenberg books in the first screen of results"
+echo "PASS: ebooks from Standard Ebooks and Project Gutenberg"
 tap ebooks "Pride and Prejudice"
 wait_for ebook-page 'text="Read"' 20 "the ebook page has no Read button"
 shot 3-ebook-page
