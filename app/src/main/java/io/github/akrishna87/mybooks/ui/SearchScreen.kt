@@ -1,5 +1,10 @@
 package io.github.akrishna87.mybooks.ui
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -29,6 +34,27 @@ import kotlinx.coroutines.delay
 fun SearchScreen(vm: BooksViewModel) {
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = LocalFocusManager.current
+    // Say a title or author: Android's own speech recogniser listens, so Folio needs no microphone permission.
+    val voice = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val heard = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.trim()
+        if (!heard.isNullOrEmpty()) {
+            vm.query = heard
+            vm.search(Query(heard))
+            keyboard?.hide()
+            focus.clearFocus()
+        }
+    }
+    val listen = {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            .putExtra(RecognizerIntent.EXTRA_PROMPT, "Say a title or author")
+            .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+        try {
+            voice.launch(intent)
+        } catch (e: ActivityNotFoundException) {
+            vm.say("Voice search isn't available on this phone")
+        }
+    }
     // Search a moment after typing stops.
     LaunchedEffect(vm.query) {
         val text = vm.query.trim()
@@ -47,7 +73,10 @@ fun SearchScreen(vm: BooksViewModel) {
                 placeholder = { Text("Title or author") },
                 leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
                 trailingIcon = {
-                    if (vm.query.isNotEmpty()) IconButton(onClick = vm::clearSearch) { Icon(Icons.Rounded.Close, "Clear") }
+                    Row {
+                        if (vm.query.isNotEmpty()) IconButton(onClick = vm::clearSearch) { Icon(Icons.Rounded.Close, "Clear") }
+                        IconButton(onClick = listen) { Icon(Icons.Rounded.Mic, "Search by voice") }
+                    }
                 },
                 singleLine = true,
                 shape = RoundedCornerShape(10.dp),

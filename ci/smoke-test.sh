@@ -143,6 +143,8 @@ tap home "Search" last # the tab, not a link on Home
 sleep 2
 dump search
 grep -q 'text="Browse by subject"' "$OUT/search.xml" || fail "Search doesn't show the subject tiles"
+grep -q 'content-desc="Search by voice"' "$OUT/search.xml" || fail "Search has no voice search button"
+echo "PASS: voice search button"
 tap search "Title or author"
 sleep 1
 # Not the exact title: the matcher ignores case and would tap the search box instead.
