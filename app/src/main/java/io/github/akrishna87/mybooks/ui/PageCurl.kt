@@ -26,11 +26,14 @@ import kotlin.math.sin
  * flat, below -width it has gone.
  */
 class PageCurlView(context: Context) : View(context) {
+    private companion object {
+        const val STRIP_STEPS = 24
+    }
+
     var front: Bitmap? = null
         set(value) {
             field = value
             frontShader = value?.let { BitmapShader(it, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP) }
-            backShader = value?.let { BitmapShader(washed(it), Shader.TileMode.CLAMP, Shader.TileMode.CLAMP) }
             invalidate()
         }
     var under: Bitmap? = null
@@ -51,7 +54,11 @@ class PageCurlView(context: Context) : View(context) {
     val gone get() = -width * 1.15f
 
     private var frontShader: BitmapShader? = null
-    private var backShader: BitmapShader? = null
+    /** Washes the back of the page in its own colour, so its text shows through only faintly. */
+    private val wash = Paint()
+    // Reused every frame, so dragging a page doesn't make garbage for the collector.
+    private val verts = FloatArray((STRIP_STEPS + 1) * 4)
+    private val texs = FloatArray((STRIP_STEPS + 1) * 4)
     private val meshPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val shade = Paint()
     private val dp = context.resources.displayMetrics.density
@@ -59,12 +66,6 @@ class PageCurlView(context: Context) : View(context) {
     init {
         // Before Android 10 the GPU renderer can't draw meshes (drawVertices).
         if (android.os.Build.VERSION.SDK_INT < 29) setLayerType(LAYER_TYPE_SOFTWARE, null)
-    }
-
-    private fun washed(src: Bitmap): Bitmap {
-        val copy = src.copy(Bitmap.Config.ARGB_8888, true)
-        Canvas(copy).drawColor((paper and 0x00FFFFFF) or (0xD0 shl 24))
-        return copy
     }
 
     /** Where page column [x] lands once curled round the cylinder whose axis is at [a]. */
@@ -80,10 +81,8 @@ class PageCurlView(context: Context) : View(context) {
 
     private fun strip(c: Canvas, shader: BitmapShader, from: Float, to: Float, a: Float, r: Float) {
         if (to - from < 0.5f) return
-        val n = 24
+        val n = STRIP_STEPS
         val h = height.toFloat()
-        val verts = FloatArray((n + 1) * 4)
-        val texs = FloatArray((n + 1) * 4)
         for (i in 0..n) {
             val x = from + (to - from) * i / n
             val px = project(x, a, r)
@@ -104,7 +103,6 @@ class PageCurlView(context: Context) : View(context) {
         under?.let { c.drawBitmap(it, 0f, 0f, null) }
         val page = front ?: return
         val fs = frontShader ?: return
-        val bs = backShader ?: return
         val w = width.toFloat()
         val r = radius
         val a = edge - r // the cylinder's axis
@@ -131,7 +129,11 @@ class PageCurlView(context: Context) : View(context) {
         if (backFrom < w) {
             val farEdge = project(w, a, r)
             band(c, farEdge, farEdge - 14 * dp, 0x40, 0x00) // its shadow on the page below
-            strip(c, bs, backFrom, w, a, r)
+            strip(c, fs, backFrom, w, a, r)
+            // The back lands between the far edge and the top of the fold; wash it in the paper colour.
+            wash.color = (paper and 0x00FFFFFF) or (0xD0 shl 24)
+            val top = project(backFrom, a, r)
+            c.drawRect(minOf(farEdge, top), 0f, maxOf(farEdge, top), height.toFloat(), wash)
             band(c, a + r, a, 0x28, 0x00) // darker where it turns over
         }
     }

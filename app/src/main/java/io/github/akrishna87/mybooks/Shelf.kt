@@ -75,15 +75,31 @@ object ShelfStore {
         return list
     }
 
+    /** Writes happen one at a time on this thread, so saving never holds up the screen. */
+    private val writer = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "Folio shelf").apply { isDaemon = true } }
+    /** The newest list still to be written; several quick saves in a row write only the last. */
+    private val unsaved = java.util.concurrent.atomic.AtomicReference<List<ShelfItem>?>(null)
+
     @Synchronized
     fun save(context: Context, list: List<ShelfItem>) {
         cache = list
-        val arr = JSONArray()
-        list.forEach { arr.put(it.toJson()) }
-        val f = file(context)
-        val tmp = File(f.path + ".tmp")
-        tmp.writeText(arr.toString())
-        tmp.renameTo(f)
+        val app = context.applicationContext
+        if (unsaved.getAndSet(list) == null) {
+            writer.execute { unsaved.getAndSet(null)?.let { write(app, it) } }
+        }
+    }
+
+    private fun write(context: Context, list: List<ShelfItem>) {
+        try {
+            val arr = JSONArray()
+            list.forEach { arr.put(it.toJson()) }
+            val f = file(context)
+            val tmp = File(f.path + ".tmp")
+            tmp.writeText(arr.toString())
+            tmp.renameTo(f)
+        } catch (e: Exception) {
+            android.util.Log.w("Folio", "Couldn't save the shelf", e)
+        }
     }
 
     fun get(context: Context, id: String): ShelfItem? = load(context).firstOrNull { it.id == id }

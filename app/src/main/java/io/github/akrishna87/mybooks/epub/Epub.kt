@@ -38,14 +38,23 @@ class Epub(
     /** Media type of every file listed in the book, by path. */
     val mediaTypes: Map<String, String>,
 ) {
-    fun spineIndexOf(path: String): Int = spine.indexOfFirst { it.path == path }
+    /** Each spine item's position by path (the first, if a path is listed twice). */
+    private val spineIndex: Map<String, Int> by lazy {
+        HashMap<String, Int>(spine.size * 2).also { m -> spine.forEachIndexed { i, item -> m.putIfAbsent(item.path, i) } }
+    }
+
+    fun spineIndexOf(path: String): Int = spineIndex[path] ?: -1
 
     /** The table of contents line for a spine item: the last entry at or before it. */
     fun chapterTitle(spineIndex: Int): String {
         var best: TocEntry? = null
+        var bestIndex = -1
         for (e in toc) {
             val i = spineIndexOf(e.path)
-            if (i in 0..spineIndex && (best == null || i >= spineIndexOf(best.path))) best = e
+            if (i in 0..spineIndex && (best == null || i >= bestIndex)) {
+                best = e
+                bestIndex = i
+            }
         }
         return best?.title ?: ""
     }

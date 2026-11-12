@@ -97,23 +97,50 @@
   function report() {
     if (!R) return;
     var start = firstOffsetOnPage();
-    var here = '';
+    var here = '', x = bookmarks.length ? curX() : 0;
     for (var i = 0; i < bookmarks.length; i++) {
-      if (pageOfOffset(bookmarks[i][0]) === page) { here = bookmarks[i][1]; break; }
+      if (pageOfOffset(bookmarks[i][0], x) === page) { here = bookmarks[i][1]; break; }
     }
     R.onPage(page, pages, Math.max(0, start), here, start >= 0 ? snippet(start) : '');
   }
 
   // ----- Positions in the text -----
+  //
+  // The chapter's text nodes, where each starts (in characters) and the whole text are worked
+  // out once and kept until highlights change the DOM: reading them again on every page turn
+  // made turning slow late in a long chapter.
 
-  function textNodes() {
-    var out = [];
+  var cache = null;
+
+  function invalidate() { cache = null; }
+
+  function text() {
+    if (cache) return cache;
+    var nodes = [], starts = [], parts = [], pos = 0;
     var b = body();
-    if (!b) return out;
-    var w = document.createTreeWalker(b, NodeFilter.SHOW_TEXT, null);
-    var n;
-    while ((n = w.nextNode())) out.push(n);
-    return out;
+    if (b) {
+      var w = document.createTreeWalker(b, NodeFilter.SHOW_TEXT, null);
+      var n;
+      while ((n = w.nextNode())) {
+        nodes.push(n);
+        starts.push(pos);
+        parts.push(n.data);
+        pos += n.data.length;
+      }
+    }
+    // Only nodes with something to see can be on a page.
+    var visible = [];
+    for (var i = 0; i < nodes.length; i++) if (nodes[i].data.trim()) visible.push(i);
+    cache = { nodes: nodes, starts: starts, visible: visible, all: null, parts: parts };
+    return cache;
+  }
+
+  function textNodes() { return text().nodes; }
+
+  function allText() {
+    var t = text();
+    if (t.all === null) { t.all = t.parts.join(''); t.parts = null; }
+    return t.all;
   }
 
   function offsetOf(container, off) {
@@ -123,18 +150,24 @@
     return r.toString().length;
   }
 
+  // The text node holding character n, found by binary search over where each node starts.
   function locate(n) {
-    var nodes = textNodes(), pos = 0;
-    for (var i = 0; i < nodes.length; i++) {
-      var len = nodes[i].data.length;
-      if (n < pos + len) return { node: nodes[i], off: n - pos };
-      pos += len;
+    var t = text(), nodes = t.nodes, starts = t.starts;
+    if (!nodes.length) return null;
+    var lo = 0, hi = nodes.length - 1;
+    while (lo < hi) {
+      var mid = (lo + hi + 1) >> 1;
+      if (starts[mid] <= n) lo = mid; else hi = mid - 1;
     }
-    var last = nodes[nodes.length - 1];
-    return last ? { node: last, off: last.data.length } : null;
+    var node = nodes[lo], off = n - starts[lo];
+    if (off >= node.data.length) {
+      if (lo === nodes.length - 1) return { node: node, off: node.data.length };
+      return { node: nodes[lo + 1], off: 0 };
+    }
+    return { node: node, off: Math.max(0, off) };
   }
 
-  function pageOfOffset(n) {
+  function pageOfOffset(n, x) {
     var loc = locate(n);
     if (!loc) return 0;
     var r = document.createRange();
@@ -143,54 +176,66 @@
     var rects = r.getClientRects();
     var rect = rects.length ? rects[0] : (loc.node.parentElement && loc.node.parentElement.getBoundingClientRect());
     if (!rect) return 0;
-    return Math.max(0, Math.min(pages - 1, Math.floor((rect.left - curX()) / width)));
+    return Math.max(0, Math.min(pages - 1, Math.floor((rect.left - (x === undefined ? curX() : x)) / width)));
   }
 
   // Where a character sits from the left edge of the current page, wherever the body is sliding.
-  function charLeft(node, i) {
+  function charLeft(node, i, shift) {
     var r = document.createRange();
     r.setStart(node, i);
     r.setEnd(node, i + 1);
     var rects = r.getClientRects();
-    return rects.length ? rects[0].left - curX() - page * width : -Infinity;
+    return rects.length ? rects[0].left - shift : -Infinity;
   }
 
-  // Where the text on the current page starts, or -1 if the page has no text.
+  // Where text node i lies against the current page: -1 before it, 0 on it, 1 after it, or
+  // null if it takes no space (hidden text, say).
+  function side(node, shift) {
+    var r = document.createRange();
+    r.selectNodeContents(node);
+    var rects = r.getClientRects(), first = null, last = null;
+    for (var k = 0; k < rects.length; k++) {
+      if (rects[k].width > 0) { if (!first) first = rects[k]; last = rects[k]; }
+    }
+    if (!first) return null;
+    for (var j = 0; j < rects.length; j++) {
+      var left = rects[j].left - shift, right = rects[j].right - shift;
+      if (rects[j].width > 0 && left < width && right > 0) return { at: 0, startsHere: rects[j] === first && left >= 0 };
+    }
+    return { at: last.right - shift <= 0 ? -1 : 1 };
+  }
+
+  // Where the text on the current page starts, or -1 if the page has no text. Text runs through
+  // the pages in order, so a binary search finds the first node that isn't on an earlier page.
   function firstOffsetOnPage() {
-    var nodes = textNodes(), pos = 0, shift = curX() + page * width;
-    for (var i = 0; i < nodes.length; i++) {
-      var node = nodes[i], len = node.data.length;
-      if (node.data.trim()) {
-        var r = document.createRange();
-        r.selectNodeContents(node);
-        var rects = r.getClientRects(), visible = false, startsHere = false;
-        for (var k = 0; k < rects.length; k++) {
-          var left = rects[k].left - shift, right = rects[k].right - shift;
-          if (rects[k].width > 0 && left < width && right > 0) {
-            visible = true;
-            if (k === 0 && left >= 0) startsHere = true;
-            break;
-          }
-        }
-        if (visible) {
-          if (startsHere) return pos;
-          // The paragraph began on an earlier page: find its first character on this one.
-          var lo = 0, hi = len - 1;
-          while (lo < hi) {
-            var mid = (lo + hi) >> 1;
-            if (charLeft(node, mid) >= 0) hi = mid; else lo = mid + 1;
-          }
-          return pos + lo;
-        }
+    var t = text(), nodes = t.nodes, vis = t.visible, shift = curX() + page * width;
+    // lo never passes the first node on (or after) this page; the loop below walks on from it.
+    var lo = 0, hi = vis.length;
+    while (lo < hi) {
+      var mid = (lo + hi) >> 1, m = mid, s = null;
+      while (m < hi && !(s = side(nodes[vis[m]], shift))) m++; // skip nodes that take no space
+      if (s && s.at < 0) lo = m + 1; else hi = mid;
+    }
+    // lo is now the first node not before this page (allowing for nodes that take no space).
+    for (var i = lo; i < vis.length; i++) {
+      var idx = vis[i], node = nodes[idx], len = node.data.length, sd = side(node, shift);
+      if (!sd) continue;
+      if (sd.at > 0) return -1; // the page holds no text (a picture, say)
+      if (sd.at < 0) continue;
+      if (sd.startsHere) return t.starts[idx];
+      // The paragraph began on an earlier page: find its first character on this one.
+      var a = 0, b = len - 1;
+      while (a < b) {
+        var c = (a + b) >> 1;
+        if (charLeft(node, c, shift) >= 0) b = c; else a = c + 1;
       }
-      pos += len;
+      return t.starts[idx] + a;
     }
     return -1;
   }
 
   function snippet(n) {
-    var text = textNodes().map(function (t) { return t.data; }).join('');
-    return text.substr(n, 140).replace(/\s+/g, ' ').trim();
+    return allText().substr(n, 140).replace(/\s+/g, ' ').trim();
   }
 
   // ----- Highlights and bookmarks -----
@@ -216,6 +261,7 @@
       }
       pos += len;
     }
+    invalidate();
   }
 
   function recolor(id, color, hasNote) {
@@ -243,6 +289,7 @@
       parent.removeChild(m);
       parent.normalize();
     }
+    invalidate();
   }
 
   function selectionInfo() {

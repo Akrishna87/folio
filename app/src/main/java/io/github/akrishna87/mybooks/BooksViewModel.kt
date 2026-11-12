@@ -112,14 +112,34 @@ class BooksViewModel(app: Application) : AndroidViewModel(app) {
     var popularAudio by mutableStateOf<Load<List<Book>>>(Load.Loading); private set
     var popularEbooks by mutableStateOf<Load<List<Book>>>(Load.Loading); private set
 
+    private var homeRefreshed = false
+
+    /**
+     * Shows the lists from last time straight away (if there are any), then fetches fresh ones
+     * in the background. A failed refresh keeps the lists from last time on screen.
+     */
     fun loadHome() {
-        if (popularAudio !is Load.Ready) viewModelScope.launch {
-            popularAudio = Load.Loading
-            popularAudio = try { Load.Ready(Catalog.popular(Kind.AUDIOBOOK)) } catch (e: Exception) { Load.Failed(friendlyError(e)) }
-        }
-        if (popularEbooks !is Load.Ready) viewModelScope.launch {
-            popularEbooks = Load.Loading
-            popularEbooks = try { Load.Ready(Catalog.popular(Kind.EBOOK)) } catch (e: Exception) { Load.Failed(friendlyError(e)) }
+        loadPopular(Kind.AUDIOBOOK, { popularAudio }, { popularAudio = it })
+        loadPopular(Kind.EBOOK, { popularEbooks }, { popularEbooks = it })
+        homeRefreshed = true
+    }
+
+    private fun loadPopular(kind: Kind, get: () -> Load<List<Book>>, set: (Load<List<Book>>) -> Unit) {
+        if (get() is Load.Ready && homeRefreshed) return
+        viewModelScope.launch {
+            if (get() !is Load.Ready) {
+                withContext(Dispatchers.IO) { HomeCache.load(context, kind) }?.let { set(Load.Ready(it)) }
+            }
+            if (get() !is Load.Ready) set(Load.Loading)
+            try {
+                val fresh = Catalog.popular(kind)
+                if (fresh.isNotEmpty() || get() !is Load.Ready) set(Load.Ready(fresh))
+                withContext(Dispatchers.IO) { HomeCache.save(context, kind, fresh) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (get() !is Load.Ready) set(Load.Failed(friendlyError(e)))
+            }
         }
     }
 

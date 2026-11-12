@@ -767,7 +767,8 @@ fun ReaderScreen(vm: BooksViewModel, bookId: String) {
     val textColor = parseColor(theme.text)
     var panel by remember { mutableStateOf<String?>(null) } // "toc", "style" or "search"
     var noteFor by remember { mutableStateOf<String?>(null) } // the highlight whose note is being written
-    controller.css = readerCss(style)
+    // Built once per style, not on every page turn.
+    controller.css = remember(style) { readerCss(style) }
     controller.turnStyle = style.pageTurn.name.lowercase()
     controller.paperColor = background.toArgb()
 
@@ -920,12 +921,7 @@ fun ReaderScreen(vm: BooksViewModel, bookId: String) {
 
         if (epub != null) {
             // Where you are, always shown, quietly.
-            Text(
-                if (controller.pages > 0) "Page ${controller.page + 1} of ${controller.pages}" else "",
-                color = textColor.copy(alpha = 0.55f),
-                fontSize = 12.sp,
-                modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 12.dp),
-            )
+            PageNumber(controller, textColor, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 12.dp))
         }
 
         AnimatedVisibility(controller.chrome && epub != null, enter = fadeIn(), exit = fadeOut()) {
@@ -1060,6 +1056,17 @@ fun ReaderScreen(vm: BooksViewModel, bookId: String) {
             "search" -> SearchPanel(controller, theme) { panel = null }
         }
     }
+}
+
+/** Its own composable, so turning a page redraws only this line, not the whole reader. */
+@Composable
+private fun PageNumber(controller: ReaderController, color: Color, modifier: Modifier) {
+    Text(
+        if (controller.pages > 0) "Page ${controller.page + 1} of ${controller.pages}" else "",
+        color = color.copy(alpha = 0.55f),
+        fontSize = 12.sp,
+        modifier = modifier,
+    )
 }
 
 @Composable
